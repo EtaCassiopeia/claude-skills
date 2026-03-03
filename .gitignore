@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Override global gitignore that excludes CLAUDE.md
+!config/CLAUDE.md
+
+# Claude Code session data (not config)
+.claude/projects/
+.claude/tasks/
+
+# Backups created by setup.sh
+*.backup.*
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

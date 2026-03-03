@@ -1,0 +1,151 @@
+# Claude Code Config
+
+Reproducible Claude Code configuration for Rust and Scala 3 / ZIO 2 development.
+
+## What's Inside
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| CLAUDE.md | `config/CLAUDE.md` | Global instructions — coding philosophy, build commands, conventions |
+| Rules | `config/rules/` | Language-specific rules (Rust, Scala 3 / ZIO 2) |
+| Agents | `config/agents/` | Specialized agents (architect, developer, reviewer, tester) |
+| Skills | `config/skills/` | Slash commands (`/rust-check`, `/scala-check`) |
+| Settings | `config/settings.json` | Plugins, hooks, and permissions |
+| MCP Servers | `config/mcp-servers.json` | MCP server registrations (cargo-mcp, rust-analyzer-mcp) |
+
+## Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and run at least once (`~/.claude/` must exist)
+- [Rust toolchain](https://rustup.rs) (`cargo`, `rustc`)
+- `python3` (ships with macOS)
+- Optional: Java 11+ and [sbt](https://www.scala-sbt.org/) for Scala development
+
+## Quick Start
+
+```sh
+git clone <this-repo-url> ~/Projects/claude-skills
+cd ~/Projects/claude-skills
+./setup.sh
+```
+
+Then start a new Claude Code session to pick up the changes.
+
+## What Setup Does
+
+The `setup.sh` script is idempotent — safe to re-run anytime (e.g., after `git pull`).
+
+1. **Preflight** — verifies `claude`, `cargo`, `python3` are available and `~/.claude/` exists
+2. **Create directories** — ensures all required directories exist under `~/.claude/`
+3. **Symlink files** — links `~/.claude/{CLAUDE.md, rules, agents, skills}` to files in this repo. If a regular file exists, it's backed up first. Correct symlinks are skipped.
+4. **Merge settings.json** — deep-merges `config/settings.json` into `~/.claude/settings.json`. Repo values win on conflicts; any extra user-added entries are preserved. Backs up before writing.
+5. **Register MCP servers** — patches `~/.claude.json` to add MCP server entries. Only touches the `mcpServers` key; all other data (telemetry, state) is untouched. Backs up before writing.
+6. **Install MCP binaries** — runs `cargo install` for `cargo-mcp` and `rust-analyzer-mcp` (skips if already installed)
+7. **Verify** — confirms all symlinks, settings keys, MCP registrations, and binaries
+
+## Agents
+
+Agents are specialized Claude Code modes with constrained tool access.
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| **architect** | System design, module organization, dependency analysis | Read-only |
+| **developer** | Write code, fix bugs, refactor | Read + Write + Bash |
+| **reviewer** | Code review, security scan, idiom compliance | Read-only + clippy/compile |
+| **tester** | Write tests, coverage analysis, property-based testing | Read + Write + Bash |
+
+Use them with `@architect`, `@developer`, `@reviewer`, `@tester` in Claude Code.
+
+## Skills
+
+Skills are slash-command workflows.
+
+- `/rust-check` — runs `cargo fmt --check` → `cargo clippy` → `cargo test` → `cargo deny check`
+- `/scala-check` — runs `sbt compile` → `sbt scalafmtCheckAll` → `sbt test`
+
+Both stop on first failure and report results in a summary table.
+
+## MCP Servers
+
+| Server | Purpose |
+|--------|---------|
+| `cargo-mcp` | Cargo commands as MCP tools (check, clippy, test, fmt, build, bench) |
+| `rust-analyzer-mcp` | Code intelligence: symbols, definitions, references, hover, diagnostics |
+
+These are user-scope MCP servers registered in `~/.claude.json`. The `rust-analyzer-lsp` plugin is configured via `settings.json`.
+
+## Hooks
+
+The `settings.json` includes PostToolUse hooks that run automatically:
+
+- **Rust**: After any `Edit` or `Write` to a `.rs` file → `cargo check` runs automatically
+- **Scala**: After any `Edit` or `Write` to a `.scala` file → `sbt compile` runs automatically
+
+This gives instant compilation feedback as Claude Code edits your code.
+
+## Per-Project Scala/Metals Setup
+
+Metals v1.6.5+ has a built-in MCP server. Two options:
+
+**With an IDE (VS Code, Neovim):** Add to Metals settings:
+```json
+{
+  "metals.startMcpServer": true,
+  "metals.defaultBspToBuildTool": true,
+  "metals.mcpClient": "claude"
+}
+```
+Metals auto-generates `.mcp.json` at project root.
+
+**Headless:** Use [metals-standalone-client](https://github.com/jpablo/metals-standalone-client):
+```sh
+curl -L -o metals-standalone-client \
+  https://github.com/jpablo/metals-standalone-client/releases/latest/download/metals-standalone-client-macos-executable
+chmod +x metals-standalone-client
+./metals-standalone-client /path/to/your/scala/project
+```
+
+## Making Changes
+
+Edit files in `config/` — changes are instantly reflected in `~/.claude/` via symlinks.
+
+For `settings.json` or `mcp-servers.json` changes, re-run `./setup.sh` to merge them.
+
+Typical workflow:
+```sh
+# Edit a config file
+vim config/rules/rust.md
+
+# Changes are live immediately (symlinked)
+# Start a new Claude Code session to pick them up
+
+# For settings/MCP changes:
+./setup.sh
+
+# Commit
+git add -A && git commit -m "Update rust rules"
+```
+
+## Troubleshooting
+
+**Skills don't appear:** Start a new Claude Code session. Skills are loaded at startup.
+
+**MCP servers not connecting:** Check that the binaries are installed (`which cargo-mcp rust-analyzer-mcp`). If missing, run `./setup.sh` or `cargo install cargo-mcp rust-analyzer-mcp`.
+
+**Settings not applied:** Run `./setup.sh` to re-merge. Check `~/.claude/settings.json` to verify.
+
+**Symlink broken:** Run `./setup.sh` — it will detect and fix broken symlinks.
+
+**Backup files:** Backups are created as `<filename>.backup.<timestamp>` next to the original file. Safe to delete old ones.
+
+## Uninstalling
+
+```sh
+# Remove symlinks and restore backups (or just delete symlinks)
+for f in ~/.claude/CLAUDE.md ~/.claude/rules/rust.md ~/.claude/rules/scala-zio.md \
+         ~/.claude/agents/*/AGENT.md ~/.claude/skills/*/SKILL.md; do
+    [ -L "$f" ] && rm "$f"
+done
+
+# Optionally remove MCP binaries
+cargo uninstall cargo-mcp rust-analyzer-mcp
+```

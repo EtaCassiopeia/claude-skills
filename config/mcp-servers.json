@@ -1,0 +1,14 @@
+{
+  "cargo-mcp": {
+    "type": "stdio",
+    "command": "cargo-mcp",
+    "args": [],
+    "env": {}
+  },
+  "rust-analyzer-mcp": {
+    "type": "stdio",
+    "command": "rust-analyzer-mcp",
+    "args": [],
+    "env": {}
+  }
+}

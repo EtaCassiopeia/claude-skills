@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(git config:*)",
+      "Bash(xargs:*)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:tigran.tech)",
+      "WebFetch(domain:www.julian.ac)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:www.vincentbruijn.nl)",
+      "WebFetch(domain:www.40tude.fr)",
+      "WebFetch(domain:www.chris-kipp.io)",
+      "WebFetch(domain:softwaremill.com)",
+      "WebFetch(domain:zio.dev)",
+      "mcp__plugin_github_github__search_code",
+      "mcp__plugin_github_github__get_file_contents",
+      "WebFetch(domain:crates.io)",
+      "WebFetch(domain:scalameta.org)",
+      "WebFetch(domain:playbooks.com)",
+      "WebFetch(domain:mcpmarket.com)",
+      "mcp__plugin_github_github__list_releases",
+      "WebFetch(domain:mcpservers.org)",
+      "Bash(cargo:*)",
+      "Bash(claude:*)",
+      "Bash(claude mcp:*)",
+      "Bash(python3:*)",
+      "Bash(chmod +x:*)",
+      "Bash(./setup.sh:*)"
+    ]
+  }
+}
