@@ -75,6 +75,9 @@ dirs=(
     "$CLAUDE_DIR/agents/tester"
     "$CLAUDE_DIR/skills/rust-check"
     "$CLAUDE_DIR/skills/scala-check"
+    "$CLAUDE_DIR/skills/scala3-best-practices"
+    "$CLAUDE_DIR/skills/zio-best-practices"
+    "$CLAUDE_DIR/skills/fp-patterns"
 )
 
 for dir in "${dirs[@]}"; do
@@ -127,8 +130,11 @@ symlink_file "$CONFIG_DIR/agents/architect/AGENT.md"         "$CLAUDE_DIR/agents
 symlink_file "$CONFIG_DIR/agents/developer/AGENT.md"         "$CLAUDE_DIR/agents/developer/AGENT.md"
 symlink_file "$CONFIG_DIR/agents/reviewer/AGENT.md"          "$CLAUDE_DIR/agents/reviewer/AGENT.md"
 symlink_file "$CONFIG_DIR/agents/tester/AGENT.md"            "$CLAUDE_DIR/agents/tester/AGENT.md"
-symlink_file "$CONFIG_DIR/skills/rust-check/SKILL.md"        "$CLAUDE_DIR/skills/rust-check/SKILL.md"
-symlink_file "$CONFIG_DIR/skills/scala-check/SKILL.md"       "$CLAUDE_DIR/skills/scala-check/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/rust-check/SKILL.md"              "$CLAUDE_DIR/skills/rust-check/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/scala-check/SKILL.md"             "$CLAUDE_DIR/skills/scala-check/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/scala3-best-practices/SKILL.md"   "$CLAUDE_DIR/skills/scala3-best-practices/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/zio-best-practices/SKILL.md"      "$CLAUDE_DIR/skills/zio-best-practices/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/fp-patterns/SKILL.md"             "$CLAUDE_DIR/skills/fp-patterns/SKILL.md"
 
 # ==============================================================================
 # 4. Merge settings.json (deep merge — repo values win, extras preserved)
@@ -272,8 +278,11 @@ verify_symlink "$CLAUDE_DIR/agents/architect/AGENT.md"        "$CONFIG_DIR/agent
 verify_symlink "$CLAUDE_DIR/agents/developer/AGENT.md"        "$CONFIG_DIR/agents/developer/AGENT.md"
 verify_symlink "$CLAUDE_DIR/agents/reviewer/AGENT.md"         "$CONFIG_DIR/agents/reviewer/AGENT.md"
 verify_symlink "$CLAUDE_DIR/agents/tester/AGENT.md"           "$CONFIG_DIR/agents/tester/AGENT.md"
-verify_symlink "$CLAUDE_DIR/skills/rust-check/SKILL.md"       "$CONFIG_DIR/skills/rust-check/SKILL.md"
-verify_symlink "$CLAUDE_DIR/skills/scala-check/SKILL.md"      "$CONFIG_DIR/skills/scala-check/SKILL.md"
+verify_symlink "$CLAUDE_DIR/skills/rust-check/SKILL.md"              "$CONFIG_DIR/skills/rust-check/SKILL.md"
+verify_symlink "$CLAUDE_DIR/skills/scala-check/SKILL.md"             "$CONFIG_DIR/skills/scala-check/SKILL.md"
+verify_symlink "$CLAUDE_DIR/skills/scala3-best-practices/SKILL.md"   "$CONFIG_DIR/skills/scala3-best-practices/SKILL.md"
+verify_symlink "$CLAUDE_DIR/skills/zio-best-practices/SKILL.md"      "$CONFIG_DIR/skills/zio-best-practices/SKILL.md"
+verify_symlink "$CLAUDE_DIR/skills/fp-patterns/SKILL.md"             "$CONFIG_DIR/skills/fp-patterns/SKILL.md"
 
 # Verify settings keys
 python3 -c "
