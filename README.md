@@ -76,9 +76,10 @@ These activate automatically based on context (file type, imports, topic) and in
 | `scala3-best-practices` | `.scala` files, Scala 3 syntax questions | `enum`, `opaque type`, `given`/`using`, `extension`, `derives`, type design, metaprogramming, anti-patterns |
 | `zio-best-practices` | ZIO/zio.* imports, ZLayer, zio-test | Service Pattern 2.0, effect type algebra, error model (failures vs defects), resource scoping, concurrency, ZStream |
 | `fp-patterns` | ADT design, typeclass questions, monad composition | Algebraic design, typeclass definition/derivation, effect composition, tagless final vs concrete ZIO, anti-patterns |
-| `rust-best-practices` | `.rs` files, Cargo.toml | Error handling, ownership, async patterns, clippy config, preferred crates |
 
-All four skills can also be invoked manually with `/scala3-best-practices`, `/zio-best-practices`, `/fp-patterns`, `/rust-best-practices`.
+These can also be invoked manually: `/scala3-best-practices`, `/zio-best-practices`, `/fp-patterns`.
+
+> **Note:** A `rust-best-practices` skill is also available but installed separately via the Claude Code marketplace — it is not managed by this repo.
 
 ## MCP Servers
 
