@@ -4,10 +4,13 @@ description: >
   Comprehensive ZIO 2 coding standards, service patterns, error handling,
   concurrency, resource management, and testing guidance. TRIGGER when: code
   imports ZIO or zio.*, working with ZLayer composition, defining services,
-  fiber management, resource acquisition, or writing zio-test specs. Always
-  consult before generating ZIO effects, service definitions, or layer wiring —
-  it encodes Service Pattern 2.0 and error model distinctions that are easy to
-  get wrong and hard to refactor later.
+  fiber management, resource acquisition, writing zio-test specs, using ZIO
+  Prelude (Validation, Equal, ZPure), handling Cause/Exit, composing
+  ZSchedule retry policies, or using advanced fiber patterns (interruption
+  masks, Semaphore, Supervisor). Always consult before generating ZIO effects,
+  service definitions, or layer wiring — it encodes Service Pattern 2.0,
+  Cause/Exit semantics, and error model distinctions that are easy to get
+  wrong and hard to refactor later.
 ---
 
 # ZIO 2 Best Practices
@@ -273,6 +276,211 @@ ZStream.scoped {
 
 ---
 
+## ZIO Prelude Integration
+
+ZIO Prelude is the ZIO-native typeclass library. Prefer it over Cats in ZIO projects.
+
+```scala
+import zio.prelude.*
+
+// Derive structural instances at definition site — no boilerplate
+case class UserId(value: UUID)    derives Equal, Hash, Ord
+case class Email(value: String)   derives Equal, Hash
+enum Status derives Equal:
+  case Active, Inactive
+
+// Validation: pure error accumulation, no effects needed
+// Unlike ZIO.validate, Validation[E, A] is entirely pure
+val validated: Validation[String, User] = Validation.validate(
+  Validation.fromPredicateWith("name is empty")(name)(_.nonEmpty),
+  Validation.fromPredicateWith("age is negative")(age)(_ >= 0),
+  Validation.fromPredicateWith("email is invalid")(email)(_.contains('@'))
+)(User.apply)
+
+val result: Either[NonEmptyChunk[String], User] = validated.toEither
+
+// ZPure: stateful, deterministic, pure programs — no ZIO runtime needed
+// Use for config evaluation, state machines, rule engines, compilers
+import zio.prelude.fx.ZPure
+
+type Config[+A] = ZPure[Nothing, AppConfig, AppConfig, Any, ConfigError, A]
+
+val readTimeout: Config[Duration]      = ZPure.get.map(_.timeout)
+val readMaxRetries: Config[Int]        = ZPure.get.map(_.maxRetries)
+val combined: Config[(Duration, Int)]  = readTimeout.zip(readMaxRetries)
+
+// Run pure — no runtime, deterministic, easily testable
+val (finalState, value) = combined.run(AppConfig.default)
+```
+
+**When to reach for ZIO Prelude:**
+- `Validation[E, A]` — pure accumulation without effects (form validation, config parsing)
+- `Equal`/`Hash`/`Ord` — structural instances for domain types (replace custom `==` overrides)
+- `ZPure` — stateful pure computation where ZIO's fiber overhead is unnecessary
+- `Associative`/`Identity` — when domain values need to be combined monoïdally (stats aggregation, metrics)
+
+---
+
+## Cause & Exit — Fine-Grained Error Inspection
+
+`Exit[E, A]` and `Cause[E]` expose the full outcome of a fiber.
+
+```scala
+// Exit[E, A] = Succeed(value) | Failure(Cause[E])
+// Cause[E]   = Fail(E) | Die(Throwable) | Interrupt(FiberId)
+//            | Both(Cause, Cause)        — parallel failures
+//            | Then(Cause, Cause)        — sequential failures
+
+// Run to Exit — never throws, captures everything
+val exit: UIO[Exit[UserError, User]] = findUser(id).exit
+
+// Fold over cause — handles all variants correctly
+effect.foldCauseZIO(
+  failure = cause =>
+    if cause.isInterrupted then ZIO.interrupt
+    else cause.failureOption match
+      case Some(e: UserError.NotFound) => ZIO.succeed(User.anonymous)
+      case Some(e)                     => ZIO.fail(e)
+      case None                        => ZIO.refailCause(cause)  // re-raise defect
+  ,
+  success = ZIO.succeed
+)
+
+// Sandbox: promote defects into the typed error channel for uniform handling
+effect
+  .sandbox              // ZIO[R, Cause[E], A]
+  .mapError { cause =>
+    cause.failureOption.getOrElse(AppError.Unexpected(cause.prettyPrint))
+  }
+  .unsandbox            // ZIO[R, AppError, A]
+
+// Bring a specific Throwable defect back to typed error
+effect.unrefine { case e: TimeoutException => UserError.Timeout }
+```
+
+**Rules:**
+- Prefer `foldCauseZIO` over pattern-matching on `Exit` — it handles `Both`/`Then` correctly
+- `sandbox`/`unsandbox` for uniform error handling at service boundaries
+- Never catch `Throwable` with `.catchAll` — use `unrefine` to target specific defects
+- Inspect `Cause` only at the outermost layer (HTTP handler, `main`); propagate otherwise
+
+---
+
+## ZSchedule — Retry and Repeat
+
+Never implement retry with manual recursion. Use `Schedule`.
+
+```scala
+// Common retry policies
+val retryThrice      = Schedule.recurs(3)
+val retryExponential = Schedule.exponential(100.millis) && Schedule.recurs(5)
+val retryWithJitter  = retryExponential.jittered           // avoids thundering herd
+val retrySpaced      = Schedule.spaced(500.millis) && Schedule.recurs(10)
+
+// Retry an effect
+effect.retry(retryWithJitter)
+
+// Retry with fallback when retries are exhausted
+effect.retryOrElse(
+  retryWithJitter,
+  (err, schedule) => ZIO.logError(s"Exhausted retries: $err") *> ZIO.fail(err)
+)
+
+// Compose schedules
+val fast   = Schedule.spaced(100.millis) && Schedule.recurs(3)
+val slow   = Schedule.spaced(2.seconds)  && Schedule.recurs(20)
+val tiered = fast >>> slow          // run fast policy first, then slow
+
+val orElse  = fast || slow          // whichever allows more retries
+
+// Repeat — for periodic / background tasks
+ZIO.repeat(heartbeat)(Schedule.spaced(5.seconds))
+ZIO.repeat(cleanup)(Schedule.fixed(1.hour))
+
+// Retry only specific error types
+effect.retryWhile { case _: TransientError => true; case _ => false }
+```
+
+---
+
+## Advanced ZLayer Composition
+
+```scala
+// Horizontal: combine independent layers side-by-side
+val repos: TaskLayer[UserRepo & OrderRepo] =
+  UserRepoLive.layer ++ OrderRepoLive.layer
+
+// ZLayer.make: auto-wires the full dependency graph from a flat list
+// Compiler error if any dependency is missing; no ordering required
+val appLayer: TaskLayer[UserRepo & OrderRepo & EmailService] =
+  ZLayer.make[UserRepo & OrderRepo & EmailService](
+    UserRepoLive.layer,
+    OrderRepoLive.layer,
+    EmailServiceLive.layer,
+    DatabaseLive.layer,     // transitively required
+    CacheLive.layer
+  )
+
+// provideSome: wire partial deps, leave remaining for the outer scope
+val partialProgram: ZIO[Config, AppError, Unit] =
+  program.provideSome[Config](UserRepoLive.layer, DatabaseLive.layer)
+
+// Scoped layers are finalized in reverse acquisition order — guaranteed
+val managed: TaskLayer[ConnectionPool] = ZLayer.scoped {
+  ZIO.acquireRelease(
+    ConnectionPool.make(config),
+    pool => pool.shutdown
+  )
+}
+
+// Memoization: ZIO memoizes layers by default — each type provided once
+// To force a fresh instance per use, call .fresh on the layer
+val freshDb = DatabaseLive.layer.fresh
+```
+
+**Rules:**
+- `ZLayer.make` at the application entry point; `provide` in tests for clarity
+- Keep layers flat — avoid long `>>>` chains; wire at the top
+- Use `.provideSomeShared` in test suites to share expensive resources across tests
+- Never put `ZLayer.make` inside a per-test `provide` — it rebuilds the graph each time
+
+---
+
+## Advanced Fiber Patterns
+
+```scala
+// Uninterruptible: protect cleanup / critical section from cancellation
+ZIO.uninterruptible(releaseResource(r))
+
+// Interruptible mask: uninterruptible outer, re-enable for the main work
+ZIO.uninterruptibleMask { restore =>
+  acquireResource.flatMap { r =>
+    restore(useResource(r)).ensuring(releaseResource(r))
+    // restore() re-enables interruption for useResource only
+  }
+}
+
+// Promise: single-use async handoff between fibers
+Promise.make[Nothing, Result].flatMap { promise =>
+  producer.flatMap(promise.succeed).fork *>
+  promise.await  // blocks fiber until producer resolves
+}
+
+// Semaphore: limit concurrency without blocking threads
+Semaphore.make(permits = 4).flatMap { sem =>
+  ZIO.foreachPar(requests)(req => sem.withPermit(processRequest(req)))
+}
+
+// Supervisor: observe fiber lifecycle (debugging, metrics)
+Supervisor.track(weak = true).flatMap { supervisor =>
+  program.supervised(supervisor).flatMap { _ =>
+    supervisor.value.map(_.size)  // number of live child fibers
+  }
+}
+```
+
+---
+
 ## Testing with zio-test
 
 ```scala
@@ -334,3 +542,10 @@ object UserRepoSpec extends ZIOSpecDefault:
 | `Has[UserRepo]` type | ZIO 1.x, removed | Just `UserRepo` in environment |
 | `ZManaged` | Removed in ZIO 2 | `ZIO.scoped` + `acquireRelease` |
 | Reflexive error logging | Noise, duplicate logs | Log once at the outermost boundary |
+| Manual retry recursion | No backoff, off-by-one | Use `Schedule.exponential` / `retry` |
+| Pattern-matching on `Exit` | Misses `Both`/`Then` causes | Use `foldCauseZIO` |
+| `catchAll` on `Throwable` | Swallows defects and interrupts | Use `unrefine` to target specific types |
+| `ZIO.uninterruptible` around whole effect | Starves interrupt on shutdown | Wrap only the release/cleanup |
+| `ZLayer.make` inside per-test `provide` | Rebuilds graph each test | Use `provideSomeShared` for shared resources |
+| Cats typeclasses in ZIO projects | Dual dependency, impedance mismatch | Use ZIO Prelude (`Covariant`, `ForEach`, `Validation`) |
+| Cats `Validated` for accumulation | Extra dependency | `zio.prelude.Validation[E, A]` |

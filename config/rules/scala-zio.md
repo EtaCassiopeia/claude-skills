@@ -65,9 +65,11 @@ object UserRepoLive:
 
 ## ZLayer Composition
 
-- Use `ZLayer.make` (or `provide`/`provideSome`) for wiring
-- Keep layers flat: avoid deeply nested layer hierarchies
-- Test with `ZLayer.succeed(mockImpl)` for unit testing
+- Use `ZLayer.make` at the application entry point — it auto-wires the full dependency graph
+- Keep layers flat: avoid long `>>>` chains; wire at the top
+- Use `provide(layer1, layer2, ...)` in tests (not `ZLayer.make`) for clarity
+- Use `.provideSomeShared` in test suites for expensive resources shared across tests
+- `ZLayer.scoped` for layers that own resources; finalization order is reverse-acquisition
 
 ## Testing
 
@@ -86,6 +88,33 @@ object UserRepoLive:
 - Use `Gen` and `check` for property-based testing
 - Provide test layers with in-memory implementations, not mocks
 - Test error paths: verify correct error types propagate
+
+## ZIO Prelude
+
+Prefer ZIO Prelude over Cats for typeclass machinery in ZIO projects.
+
+- Derive `Equal`, `Hash`, `Ord` on domain types instead of overriding `equals`/`hashCode`
+- Use `Validation[E, A]` (not `ZIO.validate`) for pure, accumulating validation without effects
+- Use `ZPure` for stateful pure programs (config evaluation, rule engines, state machines) — no fiber overhead
+- Use `Associative`/`Identity` for monoïdal combination of domain values (stats, metrics aggregation)
+- Never introduce Cats as a dependency solely for `Validated` or `Functor` — ZIO Prelude covers these
+
+## Error Model — Cause and Exit
+
+- `Exit[E, A]` is the full outcome: `Succeed(a)` or `Failure(Cause[E])`
+- `Cause[E]` distinguishes: `Fail(E)` (typed), `Die(Throwable)` (defect), `Interrupt` — never conflate them
+- Use `foldCauseZIO` instead of pattern-matching on `Exit` — it handles `Both`/`Then` parallel causes
+- Use `sandbox`/`unsandbox` to promote defects into the typed error channel at service boundaries
+- Use `unrefine` to bring specific `Throwable` defects back to typed errors; never use `catchAll(Throwable)`
+- Inspect `Cause` only at the outermost layer (HTTP handler, `main`)
+
+## Retry and Scheduling
+
+- Never implement retry with manual recursion — use `Schedule`
+- Default retry policy: `Schedule.exponential(100.millis).jittered && Schedule.recurs(n)`
+- Compose schedules with `&&` (both must allow), `||` (either allows), `>>>` (sequential phases)
+- Use `retryOrElse` to provide a fallback when retries are exhausted
+- `ZIO.repeat(effect)(schedule)` for periodic/background tasks
 
 ## Advanced FP Patterns
 
