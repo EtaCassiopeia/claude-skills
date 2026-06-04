@@ -3,6 +3,8 @@
 Reproducible Claude Code configuration for Rust and Scala 3 / ZIO 2 development.
 Skills, agents, and language rules are version-controlled here and symlinked into `~/.claude/`.
 
+Includes library-specific skills for [zio-openfeature](config/skills/zio-openfeature/SKILL.md) and [Optimizely Feature Experimentation](config/skills/optimizely/SKILL.md).
+
 ## What's Inside
 
 | Component | Path | Purpose |
@@ -76,8 +78,10 @@ These activate automatically based on context (file type, imports, topic) and in
 | `scala3-best-practices` | `.scala` files, Scala 3 syntax questions | `enum`, `opaque type`, `given`/`using`, `extension`, `derives`, type design, metaprogramming, anti-patterns |
 | `zio-best-practices` | ZIO/zio.* imports, ZLayer, zio-test | Service Pattern 2.0, effect type algebra, error model (failures vs defects), resource scoping, concurrency, ZStream |
 | `fp-patterns` | ADT design, typeclass questions, monad composition | Algebraic design, typeclass definition/derivation, effect composition, tagless final vs concrete ZIO, anti-patterns |
+| `zio-openfeature` | `zio.openfeature.*` imports, FeatureFlags service, provider wiring | ZLayer factories, sync vs async init, EvaluationContext (5-level hierarchy), FeatureFlagError ADT, hooks, events, transactions, multi-provider, testing, observability, internals |
+| `optimizely` | Optimizely flag evaluation, Optimizely provider config, Optimizely + OpenFeature wiring | Flag key case sensitivity, user ID semantics, targeting rules, variables, decision reasons, graceful degradation, environment management, anti-patterns |
 
-These can also be invoked manually: `/scala3-best-practices`, `/zio-best-practices`, `/fp-patterns`.
+These can also be invoked manually: `/scala3-best-practices`, `/zio-best-practices`, `/fp-patterns`, `/zio-openfeature`, `/optimizely`.
 
 > **Note:** A `rust-best-practices` skill is also available but installed separately via the Claude Code marketplace — it is not managed by this repo.
 
