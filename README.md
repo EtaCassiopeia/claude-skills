@@ -1,6 +1,7 @@
 # Claude Code Config
 
 Reproducible Claude Code configuration for Rust and Scala 3 / ZIO 2 development.
+Skills, agents, and language rules are version-controlled here and symlinked into `~/.claude/`.
 
 ## What's Inside
 
@@ -9,7 +10,7 @@ Reproducible Claude Code configuration for Rust and Scala 3 / ZIO 2 development.
 | CLAUDE.md | `config/CLAUDE.md` | Global instructions — coding philosophy, build commands, conventions |
 | Rules | `config/rules/` | Language-specific rules (Rust, Scala 3 / ZIO 2) |
 | Agents | `config/agents/` | Specialized agents (architect, developer, reviewer, tester) |
-| Skills | `config/skills/` | Slash commands (`/rust-check`, `/scala-check`) |
+| Skills | `config/skills/` | Slash commands and best-practice reference skills |
 | Settings | `config/settings.json` | Plugins, hooks, and permissions |
 | MCP Servers | `config/mcp-servers.json` | MCP server registrations (cargo-mcp, rust-analyzer-mcp) |
 
@@ -23,7 +24,7 @@ Reproducible Claude Code configuration for Rust and Scala 3 / ZIO 2 development.
 ## Quick Start
 
 ```sh
-git clone <this-repo-url> ~/Projects/claude-skills
+git clone https://github.com/EtaCassiopeia/claude-skills ~/Projects/claude-skills
 cd ~/Projects/claude-skills
 ./setup.sh
 ```
@@ -57,12 +58,27 @@ Use them with `@architect`, `@developer`, `@reviewer`, `@tester` in Claude Code.
 
 ## Skills
 
-Skills are slash-command workflows.
+Skills are either executable slash-command workflows or reference guides Claude consults automatically.
+
+### Verification pipelines
 
 - `/rust-check` — runs `cargo fmt --check` → `cargo clippy` → `cargo test` → `cargo deny check`
 - `/scala-check` — runs `sbt compile` → `sbt scalafmtCheckAll` → `sbt test`
 
 Both stop on first failure and report results in a summary table.
+
+### Best-practice reference skills
+
+These activate automatically based on context (file type, imports, topic) and inform every code generation and review decision.
+
+| Skill | Triggers on | Covers |
+|-------|-------------|--------|
+| `scala3-best-practices` | `.scala` files, Scala 3 syntax questions | `enum`, `opaque type`, `given`/`using`, `extension`, `derives`, type design, metaprogramming, anti-patterns |
+| `zio-best-practices` | ZIO/zio.* imports, ZLayer, zio-test | Service Pattern 2.0, effect type algebra, error model (failures vs defects), resource scoping, concurrency, ZStream |
+| `fp-patterns` | ADT design, typeclass questions, monad composition | Algebraic design, typeclass definition/derivation, effect composition, tagless final vs concrete ZIO, anti-patterns |
+| `rust-best-practices` | `.rs` files, Cargo.toml | Error handling, ownership, async patterns, clippy config, preferred crates |
+
+All four skills can also be invoked manually with `/scala3-best-practices`, `/zio-best-practices`, `/fp-patterns`, `/rust-best-practices`.
 
 ## MCP Servers
 
