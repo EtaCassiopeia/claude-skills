@@ -29,7 +29,11 @@
       "Bash(chmod +x:*)",
       "Bash(./setup.sh:*)",
       "Bash(bash *)",
-      "Skill(commit-commands:commit)"
+      "Skill(commit-commands:commit)",
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)"
     ]
   }
 }
