@@ -58,6 +58,18 @@ Agents are specialized Claude Code modes with constrained tool access.
 
 Use them with `@architect`, `@developer`, `@reviewer`, `@tester` in Claude Code.
 
+## Rules
+
+Rules are always-on guidance files loaded automatically based on file path. They steer every code generation and review decision without needing to invoke a skill.
+
+| File | Scope | Covers |
+|------|-------|--------|
+| `rules/rust.md` | `**/*.rs`, `Cargo.toml` | Error handling (`thiserror`/`anyhow`), ownership, async patterns, preferred crates, clippy config |
+| `rules/scala-zio.md` | `**/*.scala`, `build.sbt` | Scala 3 syntax, ZIO 2 Service Pattern, effect types, error model, ZLayer composition, ZIO Prelude, Cause/Exit, Schedule, testing |
+| `rules/scala-typelevel.md` | `**/*.scala`, `build.sbt` | Variance (covariant/contravariant/invariant rules), GADTs, type lambdas, generic derivation choices (Magnolia vs Mirror vs Shapeless 3), `compiletime` guardrails |
+
+Rules are loaded by Claude Code's harness whenever you edit a matching file — no invocation needed. They complement the on-demand skills by providing always-available baseline guidance.
+
 ## Skills
 
 Skills are either executable slash-command workflows or reference guides Claude consults automatically.
