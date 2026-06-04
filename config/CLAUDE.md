@@ -32,6 +32,8 @@ Detailed rules are in `~/.claude/rules/`:
 - `/zio-best-practices` — ZIO 2 Service Pattern, error handling, concurrency, resources, testing (TRIGGER on ZIO imports)
 - `/fp-patterns` — Algebraic design, typeclasses, effect composition, FP anti-patterns
 - `/fp-advanced` — Category theory applied: ZIO Prelude typeclasses, Kleisli, natural transformations, Bifunctor/Contravariant/Profunctor, optics (Monocle), recursive schemes, Free monad / ZPure, typeclass laws
+- `/scala-typelevel` — Advanced Scala 3 type system for library authors: variance, GADTs, type lambdas, match types, Mirror-based derivation, Magnolia, Shapeless 3, compiletime ops
+- `/cats-ecosystem` — Cats Core typeclasses, Cats Effect 3 (IO/Resource/Ref/Deferred), FS2, Doobie, Http4s, Kyo, tagless final patterns
 
 ## Build & Verify Commands
 

@@ -10,7 +10,7 @@ Includes library-specific skills for [zio-openfeature](config/skills/zio-openfea
 | Component | Path | Purpose |
 |-----------|------|---------|
 | CLAUDE.md | `config/CLAUDE.md` | Global instructions — coding philosophy, build commands, conventions |
-| Rules | `config/rules/` | Language-specific rules (Rust, Scala 3 / ZIO 2) |
+| Rules | `config/rules/` | Language-specific rules (Rust, Scala 3 / ZIO 2, Scala type-level) |
 | Agents | `config/agents/` | Specialized agents (architect, developer, reviewer, tester) |
 | Skills | `config/skills/` | Slash commands and best-practice reference skills |
 | Settings | `config/settings.json` | Plugins, hooks, and permissions |
@@ -76,13 +76,15 @@ These activate automatically based on context (file type, imports, topic) and in
 | Skill | Triggers on | Covers |
 |-------|-------------|--------|
 | `scala3-best-practices` | `.scala` files, Scala 3 syntax questions | `enum`, `opaque type`, `given`/`using`, `extension`, `derives`, type design, metaprogramming, anti-patterns |
-| `zio-best-practices` | ZIO/zio.* imports, ZLayer, zio-test, ZIO Prelude, Cause/Exit, ZSchedule | Service Pattern 2.0, effect type algebra, error model (failures vs defects), Cause/Exit semantics, ZIO Prelude (Validation/ZPure), ZSchedule retry composition, advanced ZLayer wiring, advanced fiber patterns (interruption masks, Semaphore, Supervisor) |
+| `zio-best-practices` | ZIO/zio.* imports, ZLayer, zio-test, ZIO Prelude, Cause/Exit, ZSchedule | Service Pattern 2.0, effect type algebra, error model, Cause/Exit semantics, ZIO Prelude (Validation/ZPure), ZSchedule retry composition, advanced ZLayer wiring, fiber patterns (interruption masks, Semaphore, Supervisor) |
 | `fp-patterns` | ADT design, typeclass questions, monad composition | Algebraic design, typeclass definition/derivation, effect composition, tagless final vs concrete ZIO, anti-patterns |
-| `fp-advanced` | Category theory concepts, ZIO Prelude typeclasses, optics, Kleisli, natural transformations | ZIO Prelude (Covariant/Contravariant/ForEach/Associative), Kleisli effectful pipelines, natural transformations (F ~> G), Bifunctor/Contravariant/Profunctor, Monocle optics (Lens/Prism/Traversal), recursive schemes (Fix/cata/ana), Free monad / ZPure, typeclass law tests |
+| `fp-advanced` | Category theory, ZIO Prelude typeclasses, optics, Kleisli, natural transformations | Covariant/Contravariant/ForEach/Associative, Kleisli pipelines, F ~> G, Bifunctor/Profunctor, Monocle optics, recursive schemes, Free monad / ZPure, typeclass laws |
+| `scala-typelevel` | Variance design, GADTs, type lambdas, Mirror/Magnolia/Shapeless, compiletime ops | Variance rules, GADTs for typed ASTs, type lambdas (`[X] =>> F[X,E]`), match types, Mirror-based derivation, Magnolia typeclass derivation, Shapeless 3, `compiletime` operations, phantom types |
+| `cats-ecosystem` | `cats.*`, `cats.effect.*`, `fs2.*`, `doobie.*`, `http4s.*` imports | Cats Core typeclass hierarchy (Functor→Monad→Traverse), Validated/ValidatedNel, Kleisli, Cats Effect 3 (IO/Resource/Ref/Deferred), FS2 streams, Doobie (transactor/Fragment), Http4s routes, Kyo, tagless final patterns |
 | `zio-openfeature` | `zio.openfeature.*` imports, FeatureFlags service, provider wiring | ZLayer factories, sync vs async init, EvaluationContext (5-level hierarchy), FeatureFlagError ADT, hooks, events, transactions, multi-provider, testing, observability, internals |
 | `optimizely` | Optimizely flag evaluation, Optimizely provider config, Optimizely + OpenFeature wiring | Flag key case sensitivity, user ID semantics, targeting rules, variables, decision reasons, graceful degradation, environment management, anti-patterns |
 
-These can also be invoked manually: `/scala3-best-practices`, `/zio-best-practices`, `/fp-patterns`, `/fp-advanced`, `/zio-openfeature`, `/optimizely`.
+These can also be invoked manually: `/scala3-best-practices`, `/zio-best-practices`, `/fp-patterns`, `/fp-advanced`, `/scala-typelevel`, `/cats-ecosystem`, `/zio-openfeature`, `/optimizely`.
 
 > **Note:** A `rust-best-practices` skill is also available but installed separately via the Claude Code marketplace — it is not managed by this repo.
 

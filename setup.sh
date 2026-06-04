@@ -79,6 +79,8 @@ dirs=(
     "$CLAUDE_DIR/skills/zio-best-practices"
     "$CLAUDE_DIR/skills/fp-patterns"
     "$CLAUDE_DIR/skills/fp-advanced"
+    "$CLAUDE_DIR/skills/scala-typelevel"
+    "$CLAUDE_DIR/skills/cats-ecosystem"
 )
 
 for dir in "${dirs[@]}"; do
@@ -137,6 +139,9 @@ symlink_file "$CONFIG_DIR/skills/scala3-best-practices/SKILL.md"   "$CLAUDE_DIR/
 symlink_file "$CONFIG_DIR/skills/zio-best-practices/SKILL.md"      "$CLAUDE_DIR/skills/zio-best-practices/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/fp-patterns/SKILL.md"             "$CLAUDE_DIR/skills/fp-patterns/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/fp-advanced/SKILL.md"             "$CLAUDE_DIR/skills/fp-advanced/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/scala-typelevel/SKILL.md"         "$CLAUDE_DIR/skills/scala-typelevel/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/cats-ecosystem/SKILL.md"          "$CLAUDE_DIR/skills/cats-ecosystem/SKILL.md"
+symlink_file "$CONFIG_DIR/rules/scala-typelevel.md"                "$CLAUDE_DIR/rules/scala-typelevel.md"
 
 # ==============================================================================
 # 4. Merge settings.json (deep merge — repo values win, extras preserved)
@@ -286,6 +291,9 @@ verify_symlink "$CLAUDE_DIR/skills/scala3-best-practices/SKILL.md"   "$CONFIG_DI
 verify_symlink "$CLAUDE_DIR/skills/zio-best-practices/SKILL.md"      "$CONFIG_DIR/skills/zio-best-practices/SKILL.md"
 verify_symlink "$CLAUDE_DIR/skills/fp-patterns/SKILL.md"             "$CONFIG_DIR/skills/fp-patterns/SKILL.md"
 verify_symlink "$CLAUDE_DIR/skills/fp-advanced/SKILL.md"             "$CONFIG_DIR/skills/fp-advanced/SKILL.md"
+verify_symlink "$CLAUDE_DIR/skills/scala-typelevel/SKILL.md"         "$CONFIG_DIR/skills/scala-typelevel/SKILL.md"
+verify_symlink "$CLAUDE_DIR/skills/cats-ecosystem/SKILL.md"          "$CONFIG_DIR/skills/cats-ecosystem/SKILL.md"
+verify_symlink "$CLAUDE_DIR/rules/scala-typelevel.md"                "$CONFIG_DIR/rules/scala-typelevel.md"
 
 # Verify settings keys
 python3 -c "
