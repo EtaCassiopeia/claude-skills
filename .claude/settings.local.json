@@ -27,7 +27,9 @@
       "Bash(claude mcp:*)",
       "Bash(python3:*)",
       "Bash(chmod +x:*)",
-      "Bash(./setup.sh:*)"
+      "Bash(./setup.sh:*)",
+      "Bash(bash *)",
+      "Skill(commit-commands:commit)"
     ]
   }
 }

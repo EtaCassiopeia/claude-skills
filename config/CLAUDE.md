@@ -31,6 +31,7 @@ Detailed rules are in `~/.claude/rules/`:
 - `/scala3-best-practices` — Scala 3 syntax, type design, metaprogramming, anti-patterns (TRIGGER on .scala files)
 - `/zio-best-practices` — ZIO 2 Service Pattern, error handling, concurrency, resources, testing (TRIGGER on ZIO imports)
 - `/fp-patterns` — Algebraic design, typeclasses, effect composition, FP anti-patterns
+- `/fp-advanced` — Category theory applied: ZIO Prelude typeclasses, Kleisli, natural transformations, Bifunctor/Contravariant/Profunctor, optics (Monocle), recursive schemes, Free monad / ZPure, typeclass laws
 
 ## Build & Verify Commands
 
