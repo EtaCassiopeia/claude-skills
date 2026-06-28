@@ -3,6 +3,12 @@ name: fix-issue
 description: Implement a GitHub issue through a verifier-first, self-correcting loop in an isolated worktree. Produces ship-ready code. Usage: /fix-issue <github-issue-number>
 user_invocable: true
 argument-hint: "<issue-number>"
+allowed-tools:
+  - Bash(gh issue view:*)
+  - Bash(git remote get-url:*)
+  - Bash(git branch:*)
+  - Bash(git status:*)
+  - Bash(ls:*)
 ---
 
 ## Live Context (loaded at invocation)
