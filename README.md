@@ -74,6 +74,21 @@ Rules are loaded by Claude Code's harness whenever you edit a matching file — 
 
 Skills are either executable slash-command workflows or reference guides Claude consults automatically.
 
+### Workflow skills
+
+- `/fix-issue <issue-number>` — implement a GitHub issue end-to-end through a verifier-first,
+  self-correcting loop. It runs in an isolated git worktree, writes the failing gate tests
+  **before** implementing (so the loop optimizes a real target, not a hollow one), verifies
+  against the full project pipeline, runs the `pr-review-toolkit` review agents as an advisory
+  layer, and self-corrects for up to 3 fix cycles. On success it prints a ship-ready report and
+  hands off to `/commit-commands:commit-push-pr`; it never pushes or opens a PR itself.
+
+  Usage: `/fix-issue 194` from inside the target repo (requires an authenticated `gh`). A durable
+  run-log is written to the session scratchpad so the loop survives context compaction. The
+  guiding principle — *a loop satisfies the gate you wrote, not your goal* — and the full
+  rationale are documented in [`config/skills/fix-issue/DESIGN.md`](config/skills/fix-issue/DESIGN.md);
+  the phase-by-phase spec lives in [`SKILL.md`](config/skills/fix-issue/SKILL.md).
+
 ### Verification pipelines
 
 - `/rust-check` — runs `cargo fmt --check` → `cargo clippy` → `cargo test` → `cargo deny check`
