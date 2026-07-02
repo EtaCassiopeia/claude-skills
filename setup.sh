@@ -81,6 +81,8 @@ dirs=(
     "$CLAUDE_DIR/skills/fp-advanced"
     "$CLAUDE_DIR/skills/scala-typelevel"
     "$CLAUDE_DIR/skills/cats-ecosystem"
+    "$CLAUDE_DIR/skills/fix-issue"
+    "$CLAUDE_DIR/skills/babysit-prs"
 )
 
 for dir in "${dirs[@]}"; do
@@ -141,6 +143,8 @@ symlink_file "$CONFIG_DIR/skills/fp-patterns/SKILL.md"             "$CLAUDE_DIR/
 symlink_file "$CONFIG_DIR/skills/fp-advanced/SKILL.md"             "$CLAUDE_DIR/skills/fp-advanced/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/scala-typelevel/SKILL.md"         "$CLAUDE_DIR/skills/scala-typelevel/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/cats-ecosystem/SKILL.md"          "$CLAUDE_DIR/skills/cats-ecosystem/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/fix-issue/SKILL.md"               "$CLAUDE_DIR/skills/fix-issue/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/babysit-prs/SKILL.md"             "$CLAUDE_DIR/skills/babysit-prs/SKILL.md"
 symlink_file "$CONFIG_DIR/rules/scala-typelevel.md"                "$CLAUDE_DIR/rules/scala-typelevel.md"
 
 # ==============================================================================
