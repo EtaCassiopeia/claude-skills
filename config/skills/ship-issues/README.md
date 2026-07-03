@@ -208,6 +208,11 @@ The orchestrator captures each via the reusable **`file-finding`** skill (run on
 
 - One issue at a time (serial) — `fix-issue` isolates each in its own git worktree; serial keeps
   merges on shared base branches conflict-free.
+- **Fresh base per issue** — before implementing, the base is `git fetch`ed and fast-forwarded to
+  the remote tip, so each new worktree includes every previously-merged PR. With serial +
+  merge-before-next, each issue builds on the latest code, so conflicts are avoided rather than
+  resolved. (This freshness needs the default merge mode; under `--no-merge` earlier PRs stay open
+  and won't be in a later issue's base.)
 - A failed issue is recorded and skipped — never fatal to the batch, never merged red.
 - Per-issue: sub-skills' own **3-cycle caps**, plus at most **one** extra `fix-issue` re-run when
   babysit traces a red CI to an implementation defect.

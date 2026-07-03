@@ -47,6 +47,10 @@ rules, isolate failures so one bad issue never blocks the rest, and produce an a
 - **Serial, not parallel.** One issue at a time. `fix-issue` isolates each in its own git worktree,
   but PRs land on shared base branches; serial keeps merges conflict-free and the run legible. Do
   **not** fan out issues to parallel subagents.
+- **Every issue starts from a fresh base.** Before implementing an issue, the base is fetched and
+  fast-forwarded to the remote tip (Phase 1c), so the new worktree includes every previously-merged
+  PR. Combined with serial + merge-before-next, each issue builds on the latest code and conflicts
+  are avoided rather than fought.
 - **Failure is isolated, never fatal to the batch.** If an issue's `fix-issue` exhausts its 3-cycle
   cap, or its PR can't be driven green by `babysit-prs`, record the blocker and **move to the next
   issue**. Never merge red work; never abandon the remaining worklist because one issue failed.
@@ -199,9 +203,31 @@ in any repo, so don't hardcode rift's rules):
   record it as a blocker and `continue` rather than opening a PR against the wrong base.
 - Record the chosen base in the run-log.
 
-### 1c — Implement (Opus, inline)
-Invoke the **`fix-issue`** skill for N **inline** (so it runs on the Opus session model). It runs
-verifier-first in an isolated worktree with a hard cap of 3 fix cycles.
+### 1c — Sync the base, then implement (Opus, inline)
+
+**First, pull the base up to the remote tip so the new work is cut from the latest code.** Because
+the loop is serial and (by default) merges each PR before the next issue starts, every
+previously-shipped PR is already on the remote base by now — bring it in so `fix-issue` branches
+from it, not a stale local copy. This is what keeps each issue building on all prior merged work and
+avoids conflicts:
+
+- `git fetch origin` so `origin/<base>` is current (this is the remote tip that includes every
+  merged PR).
+- Ensure `fix-issue` cuts its **isolated worktree directly from `origin/<base>`** — e.g.
+  `git worktree add <path> -b <branch> origin/<base>`. Branching from the remote ref sidesteps any
+  stale local base entirely; never branch a new issue off a stale local base or off another issue's
+  branch.
+- Optionally fast-forward the local base for cleanliness: `git switch <base> && git merge --ff-only
+  origin/<base>` (only if `<base>` is checked out and fast-forwards). Do **not** `git reset --hard`
+  the base — it's unnecessary (you branch from `origin/<base>` directly) and is denied by the safety
+  backstop; there's nothing to reset since ship-issues never commits to a base branch.
+
+> Freshness holds only when PRs actually merge before the next issue — i.e. the default merge mode.
+> Under `--no-merge`, earlier PRs stay open, so a later issue's base won't include them; that's
+> inherent to `--no-merge`, not a bug.
+
+Then invoke the **`fix-issue`** skill for N **inline** (so it runs on the Opus session model). It
+runs verifier-first in an isolated worktree with a hard cap of 3 fix cycles.
 - **Success** (verify gate green, no unresolved review blockers) → proceed to 1d.
 - **Failure** (cap exhausted / Remaining Blockers Report) → set `status=blocked`, copy the blockers
   summary into the run-log notes, and `continue`. Do **not** open a PR for broken work.
