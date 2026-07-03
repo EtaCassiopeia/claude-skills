@@ -39,9 +39,14 @@ never ship code that doesn't pass the gate.
 
 Subagents inherit the session model unless pinned — on an expensive top-level model that
 multiplies review cost ×4 per issue. **Always pass an explicit `model` to every Agent call**
-per the table in each phase (review agents: Phase 6/7; exploration: Phase 2). The main loop
-keeps the session model; the objective verify pipeline — not model horsepower — is what
-guarantees correctness, so cheaper agents are safe wherever their output is re-verified.
+per the table in each phase (broad exploration: Phase 2 → haiku; implementation: Phase 4 →
+sonnet; review: Phase 6 → opus/sonnet; simplify: Phase 7 → haiku). The objective verify pipeline
+and the adversarial review — not the main loop's model horsepower — are what guarantee
+correctness, so cheaper agents are safe wherever their output is re-verified. That is also why
+the top-level model you *start* on matters most for cost: prefer the cheapest model that can
+still run Phases 3 and 5 well (design the gate, diagnose failures), escalate only for
+design-heavy issues, and lean on Phase-4 delegation to keep implementation drafting off the
+top-level model.
 
 Token discipline throughout the loop:
 - **Filter command output at the source**: `| grep -E "test result:|error" | tail`, `grep -c`,
@@ -68,6 +73,14 @@ loop's durable spine.
 
 If the issue is ambiguous on any acceptance criterion, ask one targeted question before
 continuing.
+
+**Model fit check (safety net).** The top-level model is fixed for this run — it cannot be
+changed mid-loop. Judge the issue against the `/triage-issue` rubric (design-first → Fable;
+mechanical/verbatim-spec → Sonnet; else → Opus). If this issue has an **open design decision**
+(no clear approach, competing trade-offs, a new abstraction whose shape is a judgment call) and
+you are NOT on Fable, say so in one line and let the user restart on Fable before you invest in a
+worktree. Otherwise note the fit and proceed. (Run `/triage-issue <N>` *before* `/fix-issue` to
+get this recommendation up front.)
 
 ---
 
@@ -131,6 +144,12 @@ Run the new tests and confirm they **fail for the right reason** (red) — a tes
 before you've implemented anything is not exercising the criterion. Record the red result in the
 run-log.
 
+**You own the gate.** The tests are designed and written here, in the main loop — this is the
+quality-critical judgment and is never delegated. Whoever writes the *implementation* (you, or a
+delegated agent in Phase 4), the gate tests must not be weakened, deleted, or edited downstream
+to make code pass. If an implementer thinks a test is wrong, it reports back and the main loop
+adjudicates.
+
 Production rules (from CLAUDE.md) that govern everything you write from here:
 - No comments unless the WHY is non-obvious (a hidden constraint, surprising invariant, workaround)
 - No `.unwrap()` / `panic!` / `todo!` in production code paths (Rust)
@@ -143,6 +162,34 @@ Production rules (from CLAUDE.md) that govern everything you write from here:
 
 Write the **minimal** production code to turn the Phase 3 tests green. Do not add scope beyond
 what the gate requires.
+
+**Delegated implementation (default for mechanical work; quality-neutral by construction).**
+The loop's quality guarantee is the gate (Phase 3, main-loop-owned) plus adversarial review
+(Phase 6, opus/sonnet) — not the drafting model. So making the red tests green may be delegated
+to a **`general-purpose` (or your `developer`) agent on `model: sonnet`** with no effect on what
+ships, *provided the guardrails below hold*. Decide per issue:
+
+- **Delegate** when the work is mechanical against a well-formed gate: clear target list, the
+  approach is settled, changes are localized.
+- **Keep in the main loop** when the issue is design-heavy, cross-cutting, or the approach is
+  still unsettled — there the main loop's judgment is the value, and delegation would risk it.
+  (Record which mode you chose in the run-log.)
+
+The delegation brief must be self-contained — the agent has none of this conversation's context:
+- the worktree path (all edits happen there; never touch files outside the Phase 2 target list);
+- the run-log's Change-required, Acceptance-criteria, and Targets (files to modify, utilities to
+  reuse — so it doesn't reinvent existing abstractions);
+- that the **gate tests already exist and are immutable** — it writes production code to make
+  them pass and must NOT weaken, delete, or edit any test (if one looks wrong, report back);
+- the production rules (no `unwrap`/`panic!`/`todo!`, errors propagate, comments only for a
+  non-obvious why, no over-engineering);
+- ask it to return the list of files changed + a one-paragraph summary, NOT a full diff.
+
+**After the agent returns, the main loop reads the diff itself** (`git -C <worktree> diff`) before
+Phase 5 — mandatory, not optional: the main loop must understand the implementation to triage
+review findings and write surgical fixes. The Fix Phase always stays in the main loop and is
+never re-delegated (fixes are context-dependent). Phases 5–8 are unchanged: the same objective
+pipeline and the same opus/sonnet review gate the delegated code exactly as they gate your own.
 
 ---
 
