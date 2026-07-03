@@ -182,12 +182,16 @@ Delegate `triage-issue` for N to a **Haiku subagent**. Use its verdict to:
 3. **Note complexity** in the run-log.
 
 ### 1b — Choose the PR base branch
-Determine the base **before** implementing, from the repo's milestone map. For this repo the rule
-lives in `CLAUDE.local.md` ("PR base branch — do NOT default to master"):
-- Read the issue's milestone / the roadmap doc to map issue → milestone → base branch.
-- Epic-branch targets: if the epic branch doesn't exist yet it must be created off `master` and
-  pushed first (per `CLAUDE.local.md`). If that setup can't be done safely unattended, record it as
-  a blocker and `continue` rather than opening a PR against the wrong base.
+Determine the base **before** implementing, from the **target repo's** convention (this skill runs
+in any repo, so don't hardcode rift's rules):
+- Read the repo's `CLAUDE.local.md` / `CLAUDE.md` for a base-branch rule. Some repos map
+  issue → milestone → base branch (e.g. rift: "PR base branch — do NOT default to master", with
+  per-milestone epic branches). If such a rule exists, follow it.
+- If the repo has **no** such rule, default to the repo's **default branch** (`main`/`master`, via
+  `gh repo view --json defaultBranchRef`).
+- Epic-branch targets (when the rule requires one): if the epic branch doesn't exist yet it must be
+  created off the default branch and pushed first. If that setup can't be done safely unattended,
+  record it as a blocker and `continue` rather than opening a PR against the wrong base.
 - Record the chosen base in the run-log.
 
 ### 1c — Implement (Opus, inline)

@@ -22,6 +22,67 @@ phase to the right model, respects the repo's base-branch rules, isolates failur
 
 New skills register at session start — **restart Claude Code after installing before first use.**
 
+## Using it in any repo (portability)
+
+`ship-issues` and its sibling skills are installed **globally** (`~/.claude/skills/` → `claude-skills`
+repo), so they're available in **every** repository — rift, zio-bdd, rift-enterprise,
+zio-bdd-toolings, etc. — with no per-repo install. The pipeline is language-agnostic: `fix-issue`
+detects the project type (Cargo / sbt / …) and adapts its verify gate, and `commit-push-pr` /
+`babysit-prs` are pure GitHub/git.
+
+Two things vary by repo, and both are handled without per-repo setup:
+
+- **Toolchain** — `cargo *` (Rust) and `sbt *` (Scala) are both allowed **globally**, so Rust and
+  Scala repos both work out of the box.
+- **Base-branch convention** — `ship-issues` reads the target repo's base-branch rule from its
+  `CLAUDE.md` / `CLAUDE.local.md` if present (e.g. rift's milestone → epic-branch map); if a repo has
+  no such rule, it defaults to that repo's default branch (`main`/`master`).
+
+So to run in another repo: just `cd` there and invoke `/ship-issues …`. Nothing else to configure.
+
+## Permissions for unattended runs
+
+Rather than `--dangerously-skip-permissions` (blanket, no guardrail, covers all subagents), the
+routine commands are pre-approved in **global** `~/.claude/settings.json` so they don't pause — and
+this covers every repo at once:
+
+- **Allowed** (already global): `gh:*`, `cargo *`, `sbt *`, `git:*`, `caffeinate:*`, `Edit`, `Write`,
+  and the usual read tools.
+- **Denied backstop** (deny overrides allow, in any settings file): `rm -rf`, `git push --force`/`-f`,
+  `git reset --hard`, `git clean -f`. So even unattended, an irreversible data-loss command is
+  blocked rather than auto-run.
+
+This is a deliberate trust increase — `Edit`/`Write` and `git push` are auto-approved in **all**
+sessions, not just `ship-issues`. The deny list is the guardrail. To scope tighter, move the
+`Edit`/`Write`/`git:*` allows out of global and into a per-repo `.claude/settings.local.json` for
+only the repos you run unattended.
+
+### Alternative: `--dangerously-skip-permissions`
+
+For a fully hands-off run you can launch Claude Code with:
+
+```sh
+caffeinate -dimsu claude --dangerously-skip-permissions
+```
+
+This skips **all** permission prompts — no allowlist needed. Use it **only** in a repo where the
+work is recoverable (everything committed; `fix-issue`'s worktrees are isolated) and the remote is
+yours. Caveats to be honest about:
+
+- **It's blanket and covers every subagent** — the Haiku babysit/commit/file-finding agents and all
+  `fix-issue` internal agents run ungated too.
+- **Treat the `deny` backstop as best-effort here.** `--dangerously-skip-permissions` is *designed*
+  to bypass the permission layer, so don't rely on the `settings.local.json` deny-list to stop a
+  destructive command in this mode. The real safety net is: everything is in git (recoverable),
+  worktrees are isolated, and the `PreToolUse` hook (`rtk hook claude`) still runs and can veto.
+- **Prefer the scoped allowlist above** for routine unattended runs; reach for
+  `--dangerously-skip-permissions` only when you knowingly accept the risk in a disposable/recoverable
+  checkout.
+
+A `deny`-list is nonetheless configured in `rift`'s `.claude/settings.local.json` (and globally) as a
+thin net for the *normal* (non-bypass) permission mode: `rm -rf`, `git push --force`/`-f`,
+`git reset --hard`, `git clean -f`.
+
 ---
 
 ## Quick start
