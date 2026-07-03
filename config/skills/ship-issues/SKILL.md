@@ -132,6 +132,9 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
      If such a PR exists and merge is enabled, hand it straight to Phase 1e (babysit) — don't
      re-implement.
    - Skip issues labeled `blocked`, `wontfix`, `needs-design`, or `question` unless named explicitly.
+   - Skip issues labeled `needs-triage` (this is the hold-for-triage label the auto-filer applies —
+     agent-found findings are not implemented until a human promotes them by removing that label)
+     unless the issue is named explicitly in the args.
 4. **Expand umbrella / tracking / epic issues — never implement them directly.** An umbrella issue
    describes a *plan enacted by other issues*, not a unit of work; handing its body to `fix-issue`
    would produce a monster PR and blow the fix cap. Detect an umbrella by **any** of:
@@ -165,7 +168,7 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
 
 ## Phase 1 — Per-issue pipeline (loop over the worklist, serial)
 
-For each issue **N** with a non-terminal status, run steps a–f. On any hard failure, set the
+For each issue **N** with a non-terminal status, run steps a–g. On any hard failure, set the
 issue's status, write the run-log, and `continue` to the next issue — never abort the whole loop.
 
 ### 1a — Triage & route (Haiku subagent)
@@ -213,7 +216,20 @@ once more before giving up (this counts against the issue's overall attempts —
 
 With `--no-merge`, skip 1e and leave the green-CI PR for review; `status` stays `pr-open`.
 
-### 1f — Checkpoint
+### 1f — Harvest & file findings (out-of-scope discoveries)
+While implementing (1c) and diagnosing CI (1e), the sub-skills routinely surface **concrete,
+out-of-scope defects or gaps** that are worth a fix but must not derail the issue in hand — the
+racy FSM transition and the stuck-pending leak in #310 are exactly this kind of discovery. For each
+such finding, delegate to the **`file-finding`** skill (a **Haiku subagent**), passing the finding,
+its evidence, a proposed fix, and the source (this issue / the PR). It dedups against open issues,
+files with `agent-found` + `needs-triage`, and returns `filed #<n>` / `duplicate of #<n>` /
+`no finding worth filing`.
+
+Findings are **held for triage**: they carry `needs-triage`, so Phase 0 excludes them from a later
+`--all` run until you promote them. This prevents a runaway find→fix→find loop while still capturing
+everything. Record filed/duplicate finding numbers in the run-log notes for this issue.
+
+### 1g — Checkpoint
 Update `.rift-ship/worklist.md`. This run-log + live GitHub state is enough to resume after
 compaction: a re-invoke re-reads it, re-prunes against open PRs/merged issues, and picks up the
 first non-terminal issue.
@@ -238,9 +254,13 @@ Then, grouped for action:
   (dischargeable — suggest closing), `umbrella-manual` (needs a human to split into issues).
 - **needs-design**: issues triage flagged as underspecified — need human input before implementing.
 - **blocked / pr-red**: the one-line blocker per issue and the suggested next step.
+- **Findings filed** (`agent-found` + `needs-triage`): the new issue numbers filed during the run,
+  noting they are held for your triage — promote (remove `needs-triage`) to make them eligible for a
+  future `--all` run.
 
-State counts plainly (e.g. "7 issues: 4 merged, 2 deferred (Fable), 1 needs-design"). Never report
-an issue as merged that `babysit-prs` didn't actually merge; never report `pr-open` as done.
+State counts plainly (e.g. "7 issues: 4 merged, 2 deferred (Fable), 1 needs-design; 3 findings
+filed (#331-#333, held for triage)"). Never report an issue as merged that `babysit-prs` didn't
+actually merge; never report `pr-open` as done.
 
 ---
 

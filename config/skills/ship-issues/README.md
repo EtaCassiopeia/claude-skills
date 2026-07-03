@@ -109,6 +109,24 @@ delegates to `babysit-prs`, whose merge-method and mergeability rules apply).
 
 ---
 
+## Auto-filed findings (feedback loop)
+
+While implementing an issue or diagnosing CI, the sub-skills routinely surface *out-of-scope*
+defects worth a fix (e.g. #310's racy FSM transition and stuck-pending leak were found this way).
+The orchestrator captures each via the reusable **`file-finding`** skill (run on a Haiku subagent):
+
+- **Quality bar** — files only a concrete, actionable, worth-fixing defect that's out of the current
+  scope. Style nits and speculative refactors are dropped.
+- **Deduped** — searches open issues first; a duplicate is commented/linked, never re-filed.
+- **`/fix-issue`-ready** — the filed issue carries provenance (source PR/issue), evidence, and a
+  proposed fix.
+- **Held for triage** — labeled `agent-found` + `needs-triage`. Phase 0 **excludes** `needs-triage`
+  issues from `--all`, so a finding is never auto-implemented in the same or next run. Promote it
+  (remove `needs-triage`, or name it explicitly) to make it eligible. This prevents a runaway
+  find→fix→find loop while still capturing everything.
+
+`file-finding` is also usable standalone: `/file-finding "stuck-pending leak on failed upstream in proxy recording"`.
+
 ## Failure isolation & caps
 
 - One issue at a time (serial) — `fix-issue` isolates each in its own git worktree; serial keeps
@@ -143,6 +161,39 @@ The loop is built so a dead session is a **pause, not a loss**:
 > that requires a self-contained cloud-native rebuild of the pipeline.
 
 ---
+
+## Unattended runs — keep the laptop awake (macOS)
+
+An unattended `--all` run needs the machine awake for the whole time. In a **separate terminal tab**
+(leave it running; `Ctrl-C` when the batch is done):
+
+```sh
+caffeinate -dimsu
+```
+
+`-d` no display sleep · `-i` no idle sleep · `-m` no disk sleep · `-s` no system sleep ·
+`-u` declare user active. Time-box it if you prefer: `caffeinate -dimsu -t 28800` (8 h).
+
+Or bind it to the run so it stops on its own when Claude Code exits:
+
+```sh
+caffeinate -dimsu -w $(pgrep -n -f 'claude')
+```
+
+Two caveats that actually bite:
+
+- **Keep the lid open.** `caffeinate` blocks *idle* sleep but **not lid-close** sleep — closing the
+  lid sleeps the machine anyway unless you're in clamshell mode (external display + power + external
+  keyboard). For truly unattended, lid open on a desk.
+- **Stay plugged in.** `-s` only holds on AC power; on battery macOS can still sleep.
+
+GUI alternative: **System Settings → Battery → Power Adapter → "Prevent automatic sleeping when the
+display is off."**
+
+> Keeping the machine awake is necessary but not sufficient across a token throttle: an awake machine
+> with an idle Claude session still won't advance until you re-invoke after tokens recharge (see
+> *Resume* above). `caffeinate` ensures the run keeps going while it *has* tokens and is ready the
+> moment you resume.
 
 ## Flags
 
