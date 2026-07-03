@@ -1,6 +1,6 @@
 ---
 name: babysit-prs
-description: Watch one or more open PRs' CI to green and merge them, self-correcting on failure — diagnose, fix, push, re-watch until merged. Squash-merges single-commit PRs; preserves history with a crafted merge commit for multi-commit feature/epic/milestone branches. Admin-overrides a required-review block on solo repos; --admin-merge authorizes that override even when other collaborators exist. Usage: /babysit-prs [<pr-number>...] [--all] [--admin-merge]
+description: Watch one or more open PRs' CI to green and merge them, self-correcting on failure — diagnose, fix, push, re-watch until merged. Squash-merges single-commit PRs; preserves history with a crafted merge commit for multi-commit feature/epic/milestone branches. When you are a ruleset bypass actor (repo admin), admin-overrides a required-review-only block by default — even when other collaborators exist; --admin-merge is a legacy no-op. Usage: /babysit-prs [<pr-number>...] [--all] [--admin-merge]
 user_invocable: true
 argument-hint: "[<pr-number>...] | --all [--admin-merge]"
 allowed-tools:
@@ -56,10 +56,11 @@ Build the list of PRs to babysit, in the order to process them:
 3. **No args** → the PR whose head is the current branch (`gh pr view --json number`). If there
    is none, stop and say so.
 
-**Flag — `--admin-merge`:** authorize an admin-override merge (`gh pr merge --admin`) whenever a
-required *review* is the sole remaining block and you are in the branch's ruleset bypass list —
-**even if other collaborators exist** (normally the override is limited to solo repos; see Phase 3).
-CI must still be green and the PR MERGEABLE; this only skips the review gate, never a red check.
+**Flag — `--admin-merge`:** legacy no-op, kept for back-compat. As of the Phase 3 rule below, a
+ruleset **bypass actor** (repo admin) already admin-overrides a review-only block by default,
+whether or not other collaborators exist — so this flag changes nothing for a bypass actor. It only
+still matters if you are *not* a bypass actor (in which case you cannot merge regardless). CI must
+still be green and the PR MERGEABLE; the override only ever skips the review gate, never a red check.
 
 For each PR, load once: `gh pr view <n> --json number,title,state,mergeable,mergeStateStatus,baseRefName,headRefName,headRefOid,commits,isCrossRepository,url`.
 
@@ -144,12 +145,12 @@ in the legacy API:
 Classify and act:
 - **Required review is the sole block** (`reviewDecision == REVIEW_REQUIRED`, no failing required
   check, `mergeable == MERGEABLE`) **and you can bypass it** (you're a repo admin / in the ruleset's
-  `bypass_actors`):
-  - **Solo repo** (no other collaborator who could approve) → admin-override is the intended path:
-    merge with **`--admin`**. (The owner has merged their own PRs this way historically.)
-  - **Other collaborators exist** → admin-override **only if `--admin-merge` was passed**; otherwise
-    do **not** override — report that the PR needs a human approval and stop babysitting it (leave it
-    green and ready).
+  `bypass_actors`) → admin-override is the intended path: merge with **`--admin`**. This holds
+  **whether or not other collaborators exist** — being a `bypass_actors` entry (e.g. RepositoryRole
+  Admin, `bypass_mode: always`) *is* the owner's standing authorization to merge their own PRs past
+  the review gate. The `--admin-merge` flag is therefore a no-op for a bypass actor (kept only for
+  back-compat); the override applies regardless. The review gate still stands for non-bypass
+  collaborators — this only lets the bypass actor merge their own green, mergeable PR.
   - If you are **not** a bypass actor → you cannot merge it; report "needs approval" and stop.
 - A required **status check** that never ran → find and re-trigger it (or report if you can't).
 
@@ -219,7 +220,7 @@ When every requested PR has reached a terminal outcome (merged, or stopped-block
 - #319 <sha> — worktree/branch cleaned up
 
 ### Needs your attention
-- #320 — required review, other collaborators exist; won't admin-override. Green & ready.
+- #320 — required review, and you are NOT a ruleset bypass actor; can't admin-override. Green & ready.
 - #321 — <failure>; log at <scratchpad>/babysit-prs.md
 
 ### Next step
@@ -239,7 +240,7 @@ order: [#319, #320, #321]   (dependency-sorted)
 ## #319 — <title>
 - method: squash (1 commit)  | reason: standalone issue PR
 - watch: Build ✓ Lint ✓ Unit(stable/beta) ✓ Redis ✓ Compat ✓
-- gate: BLOCKED → required review, solo repo, admin → --admin
+- gate: BLOCKED → required review, bypass actor (admin) → --admin
 - result: MERGED <sha>; worktree removed
 - cycles: 0/3
 
@@ -255,8 +256,9 @@ order: [#319, #320, #321]   (dependency-sorted)
 
 - **Merge = the requested outcome.** Invoking `/babysit-prs <n>` authorizes merging those PRs when
   green. But still honor the pre-merge gate — never merge a red or non-mergeable PR.
-- **`--admin` only** to satisfy a required review that no one else can provide **and** you are an
-  admin. Never to bypass a failing required status check.
+- **`--admin` only** to satisfy a required *review* when you are a ruleset bypass actor (repo admin).
+  This applies even when other collaborators exist — bypass-actor status is the standing
+  authorization. Never use `--admin` to bypass a failing required status check.
 - **Only touch the PR's own head branch.** Never force-push; never rebase someone else's branch
   without cause; never edit files unrelated to the failing check.
 - **No Claude attribution** in commit or merge-commit bodies (global pre-push hook).

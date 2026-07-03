@@ -127,10 +127,10 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
    - `--all` — every open issue (the default when no issue numbers are given).
    - `--label <name>` — restrict to open issues carrying that label.
    - `--no-merge` — stop at green-CI PR instead of merging (merge is otherwise the default).
-   - `--admin-merge` — forwarded to `babysit-prs` (1e): authorize an admin-override merge when a
-     required *review* is the sole block and you're a ruleset bypass actor, even with other
-     collaborators. CI must still be green. On a solo repo babysit admin-overrides a required review
-     by default, so this only matters when the repo has other collaborators.
+   - `--admin-merge` — legacy no-op, forwarded to `babysit-prs` (1e). Babysit now admin-overrides a
+     required-*review*-only block by default whenever you're a ruleset bypass actor (repo admin),
+     even with other collaborators, so this flag no longer changes anything. CI must still be green
+     and the PR MERGEABLE; the override never bypasses a red required check.
    - `--force-model` — defer nothing; implement every issue on the session model (see routing above).
    - Bare integers — an explicit issue list (overrides `--all`).
 2. **Build the candidate set** from the Live Context *Open issues* (or an explicit list), applying
@@ -242,9 +242,9 @@ milestone. Record the PR number/URL in the run-log; set `status=pr-open`.
 Unless `--no-merge`, delegate **`babysit-prs`** for this PR to a **Haiku subagent** (forwarding
 `--admin-merge` if it was passed). It watches CI, fixes-on-fail on the PR's own head up to its own
 3-cycle cap, and merges when green using the merge method matching the branch shape. babysit reads
-the branch's **ruleset** (not just legacy branch protection) to classify a `BLOCKED` PR, and — on a
-solo repo, or with `--admin-merge` — admin-overrides a required *review* it can't self-satisfy
-(green CI is still required).
+the branch's **ruleset** (not just legacy branch protection) to classify a `BLOCKED` PR, and —
+whenever you are a ruleset **bypass actor** (repo admin), regardless of other collaborators —
+admin-overrides a required *review* it can't self-satisfy (green CI is still required).
 - Merged → `status=merged`.
 - babysit hard-stops (still red after its cap, or unmergeable) → `status=pr-red`, note why, `continue`.
 
