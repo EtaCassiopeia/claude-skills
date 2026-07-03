@@ -1,8 +1,8 @@
 ---
 name: ship-issues
-description: "Orchestrate the full per-issue pipeline over a set of GitHub issues — triage -> fix-issue -> commit-push-pr -> babysit-prs -> merge — in a resumable serial loop that fixes-on-fail until each issue is merged. Cheap phases run on Haiku subagents; fix-issue runs on the session model. Issues triage routes to a model the session can't cover (e.g. design-heavy -> Fable) are deferred with a relaunch command. Usage: /ship-issues [<issue-number>...] [--all] [--label <name>] [--no-merge] [--force-model]"
+description: "Orchestrate the full per-issue pipeline over a set of GitHub issues — triage -> fix-issue -> commit-push-pr -> babysit-prs -> merge — in a resumable serial loop that fixes-on-fail until each issue is merged. Cheap phases run on Haiku subagents; fix-issue runs on the session model. Issues triage routes to a model the session can't cover (e.g. design-heavy -> Fable) are deferred with a relaunch command. Usage: /ship-issues [<issue-number>...] [--all] [--label <name>] [--no-merge] [--force-model] [--admin-merge]"
 user_invocable: true
-argument-hint: "[<issue-number>...] | --all | --label <name> [--no-merge] [--force-model]"
+argument-hint: "[<issue-number>...] | --all | --label <name> [--no-merge] [--force-model] [--admin-merge]"
 allowed-tools:
   - Bash(gh issue view:*)
   - Bash(gh issue list:*)
@@ -123,6 +123,11 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
    - `--all` — every open issue (the default when no issue numbers are given).
    - `--label <name>` — restrict to open issues carrying that label.
    - `--no-merge` — stop at green-CI PR instead of merging (merge is otherwise the default).
+   - `--admin-merge` — forwarded to `babysit-prs` (1e): authorize an admin-override merge when a
+     required *review* is the sole block and you're a ruleset bypass actor, even with other
+     collaborators. CI must still be green. On a solo repo babysit admin-overrides a required review
+     by default, so this only matters when the repo has other collaborators.
+   - `--force-model` — defer nothing; implement every issue on the session model (see routing above).
    - Bare integers — an explicit issue list (overrides `--all`).
 2. **Build the candidate set** from the Live Context *Open issues* (or an explicit list), applying
    `--label` if present.
@@ -208,9 +213,12 @@ commit message (no Claude attribution in the body), PR title = issue title, body
 milestone. Record the PR number/URL in the run-log; set `status=pr-open`.
 
 ### 1e — Babysit to merged (Haiku subagent) — default
-Unless `--no-merge`, delegate **`babysit-prs`** for this PR to a **Haiku subagent**. It watches CI,
-fixes-on-fail on the PR's own head up to its own 3-cycle cap, and merges when green using the merge
-method matching the branch shape.
+Unless `--no-merge`, delegate **`babysit-prs`** for this PR to a **Haiku subagent** (forwarding
+`--admin-merge` if it was passed). It watches CI, fixes-on-fail on the PR's own head up to its own
+3-cycle cap, and merges when green using the merge method matching the branch shape. babysit reads
+the branch's **ruleset** (not just legacy branch protection) to classify a `BLOCKED` PR, and — on a
+solo repo, or with `--admin-merge` — admin-overrides a required *review* it can't self-satisfy
+(green CI is still required).
 - Merged → `status=merged`.
 - babysit hard-stops (still red after its cap, or unmergeable) → `status=pr-red`, note why, `continue`.
 

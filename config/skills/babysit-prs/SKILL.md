@@ -1,8 +1,8 @@
 ---
 name: babysit-prs
-description: Watch one or more open PRs' CI to green and merge them, self-correcting on failure — diagnose, fix, push, re-watch until merged. Squash-merges single-commit PRs; preserves history with a crafted merge commit for multi-commit feature/epic/milestone branches. Usage: /babysit-prs [<pr-number>...] [--all]
+description: Watch one or more open PRs' CI to green and merge them, self-correcting on failure — diagnose, fix, push, re-watch until merged. Squash-merges single-commit PRs; preserves history with a crafted merge commit for multi-commit feature/epic/milestone branches. Admin-overrides a required-review block on solo repos; --admin-merge authorizes that override even when other collaborators exist. Usage: /babysit-prs [<pr-number>...] [--all] [--admin-merge]
 user_invocable: true
-argument-hint: "[<pr-number>...] | --all"
+argument-hint: "[<pr-number>...] | --all [--admin-merge]"
 allowed-tools:
   - Bash(gh pr view:*)
   - Bash(gh pr list:*)
@@ -55,6 +55,11 @@ Build the list of PRs to babysit, in the order to process them:
 2. **`--all`** (or `--mine`) → every open PR authored by me (from Live Context).
 3. **No args** → the PR whose head is the current branch (`gh pr view --json number`). If there
    is none, stop and say so.
+
+**Flag — `--admin-merge`:** authorize an admin-override merge (`gh pr merge --admin`) whenever a
+required *review* is the sole remaining block and you are in the branch's ruleset bypass list —
+**even if other collaborators exist** (normally the override is limited to solo repos; see Phase 3).
+CI must still be green and the PR MERGEABLE; this only skips the review gate, never a red check.
 
 For each PR, load once: `gh pr view <n> --json number,title,state,mergeable,mergeStateStatus,baseRefName,headRefName,headRefOid,commits,isCrossRepository,url`.
 
@@ -125,12 +130,27 @@ Re-fetch `mergeable` + `mergeStateStatus` immediately before merging (CI green �
 | `BEHIND` | base moved; strict checks require up-to-date | update branch (below), then back to Phase 2 |
 | `DIRTY` | merge conflict with base | resolve conflict on the PR branch (Phase 4-style), push, back to Phase 2 |
 
-**`BLOCKED` triage:** read the block from `reviewDecision` + branch protection (Live Context).
-- **Required review with no eligible reviewer** (solo repo — you can't approve your own PR) **and
-  you are a repo admin** → this is the intended merge path here: merge with **`--admin`** to
-  satisfy the required-review rule. (The owner has merged their own PRs this way historically.)
-- Required review **with** other collaborators available → do **not** admin-override; report that
-  the PR needs a human approval and stop babysitting it (leave it green and ready).
+**`BLOCKED` triage:** determine *which* gate is unmet — from `reviewDecision` on the PR **plus**
+the branch's rules. **Read the rules from both sources**, because a modern repo often has neither
+in the legacy API:
+- Legacy branch protection: `gh api repos/{owner}/{repo}/branches/{branch}/protection` — this
+  **404s ("Branch not protected") when the repo uses a *ruleset* instead**. A 404 here does **not**
+  mean "no rules".
+- Repository **rulesets** (the common case): `gh api repos/{owner}/{repo}/rules/branches/{branch}`
+  lists the active rules; a `pull_request` rule means a review is required. Fetch the ruleset detail
+  (`gh api repos/{owner}/{repo}/rulesets/{id}`) for `required_approving_review_count` and, crucially,
+  `bypass_actors` — whether your role (e.g. RepositoryRole `5` = Admin) may bypass.
+
+Classify and act:
+- **Required review is the sole block** (`reviewDecision == REVIEW_REQUIRED`, no failing required
+  check, `mergeable == MERGEABLE`) **and you can bypass it** (you're a repo admin / in the ruleset's
+  `bypass_actors`):
+  - **Solo repo** (no other collaborator who could approve) → admin-override is the intended path:
+    merge with **`--admin`**. (The owner has merged their own PRs this way historically.)
+  - **Other collaborators exist** → admin-override **only if `--admin-merge` was passed**; otherwise
+    do **not** override — report that the PR needs a human approval and stop babysitting it (leave it
+    green and ready).
+  - If you are **not** a bypass actor → you cannot merge it; report "needs approval" and stop.
 - A required **status check** that never ran → find and re-trigger it (or report if you can't).
 
 **`BEHIND` / strict checks:** update the PR branch onto its base

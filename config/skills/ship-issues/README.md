@@ -168,6 +168,22 @@ Pass `--no-merge` to stop at a green-CI PR for manual review.
 Invoking the skill **is** authorization to push, open PRs, and merge the worklist issues (merge
 delegates to `babysit-prs`, whose merge-method and mergeability rules apply).
 
+### Required-review blocks (branch protection / rulesets)
+
+If `master` requires an approving review, a green PR shows as `BLOCKED` / `REVIEW_REQUIRED` and can't
+be merged by its own author. `babysit-prs` classifies this by reading the branch's **ruleset**
+(`gh api …/rules/branches/{branch}`) — not only the legacy branch-protection API, which returns
+`404 "Branch not protected"` when a ruleset is in use. Then:
+
+- **Solo repo, you're a bypass actor (admin)** → it admin-overrides (`gh pr merge --admin`)
+  automatically — green CI still required.
+- **Other collaborators exist** → it will **not** override unless you pass `--admin-merge`; otherwise
+  it leaves the PR green-and-ready and reports "needs approval".
+- **You can't bypass** → reports "needs approval" and stops.
+
+So on a solo repo, green PRs merge unattended; the required-review gate only stops the pipeline when
+you're not allowed to bypass it.
+
 ---
 
 ## Auto-filed findings (feedback loop)
@@ -265,6 +281,7 @@ display is off."**
 | `--label <name>` | Restrict to open issues carrying that label. |
 | `--no-merge` | Stop at green-CI PR instead of auto-merging. |
 | `--force-model` | Implement every issue on the session model, even Fable-recommended ones. |
+| `--admin-merge` | Forwarded to `babysit-prs`: admin-override a required-*review* block when you're a ruleset bypass actor, even with other collaborators (CI must still be green). Solo repos already override by default. |
 
 ## Terminal statuses (in the final report)
 
