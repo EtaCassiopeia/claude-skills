@@ -33,7 +33,13 @@
       "Bash(git push *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(gh repo *)",
+      "Bash(cp /Users/gangof3/.claude/skills/rust-best-practices/SKILL.md /Users/gangof3/Projects/claude-skills/config/skills/rust-best-practices/SKILL.md)",
+      "Bash(cp /Users/gangof3/.claude/skills/rust-best-practices/references/async.md /Users/gangof3/Projects/claude-skills/config/skills/rust-best-practices/references/async.md)",
+      "Bash(cp /Users/gangof3/.claude/skills/rust-best-practices/references/error-handling.md /Users/gangof3/Projects/claude-skills/config/skills/rust-best-practices/references/error-handling.md)",
+      "Bash(cp /Users/gangof3/.claude/skills/rust-best-practices/references/ownership-and-borrowing.md /Users/gangof3/Projects/claude-skills/config/skills/rust-best-practices/references/ownership-and-borrowing.md)",
+      "Bash(cp /Users/gangof3/.claude/skills/rust-best-practices/references/testing.md /Users/gangof3/Projects/claude-skills/config/skills/rust-best-practices/references/testing.md)"
     ]
   }
 }

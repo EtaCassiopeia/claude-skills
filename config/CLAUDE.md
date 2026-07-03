@@ -100,3 +100,5 @@ Keep running in background. It writes `.mcp.json` at project root for Claude Cod
 - Branch naming: `feat/`, `fix/`, `refactor/`, `test/` prefixes
 - Never commit secrets, `.env` files, or credentials
 - The global git hook at `~/.git-hooks/pre-push` blocks pushes with "Claude" in commit messages — respect this by not including Claude attribution in commit message bodies (Co-Authored-By trailers are fine when explicitly requested)
+
+@RTK.md

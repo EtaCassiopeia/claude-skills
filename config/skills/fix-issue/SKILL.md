@@ -35,6 +35,22 @@ phase and every fix cycle, so the loop survives context compaction and stays aud
 **Hard cap: 3 fix cycles.** If you exhaust them, emit the Remaining Blockers Report and stop —
 never ship code that doesn't pass the gate.
 
+## Model & Token Policy
+
+Subagents inherit the session model unless pinned — on an expensive top-level model that
+multiplies review cost ×4 per issue. **Always pass an explicit `model` to every Agent call**
+per the table in each phase (review agents: Phase 6/7; exploration: Phase 2). The main loop
+keeps the session model; the objective verify pipeline — not model horsepower — is what
+guarantees correctness, so cheaper agents are safe wherever their output is re-verified.
+
+Token discipline throughout the loop:
+- **Filter command output at the source**: `| grep -E "test result:|error" | tail`, `grep -c`,
+  never dump full `cargo test`/`clippy` output or whole files into context.
+- **Long builds/tests run in the background** with a filtered result file; poll the summary.
+- **Agents read the diff themselves**: pass the worktree path and `git -C <worktree> diff`
+  instructions in the prompt — never paste the diff into the agent prompt.
+- Targeted reads over full-file reads (`Read` with offset/limit, `sed -n 'A,Bp'`).
+
 ---
 
 ## Phase 0 — Understand & Init Run-Log
@@ -78,11 +94,14 @@ git worktree add .claude/worktrees/issue-<N> -b fix/issue-<N>
 
 ## Phase 2 — Locate
 
-Before writing code, find the exact targets:
+Before writing code, find the exact targets. Choose by scope:
 
-```bash
-git grep -n "<relevant symbol>"   # find existing code
-```
+- **Targeted lookup** (you know the symbol/file): inline `git grep -n "<symbol>"` — cheap,
+  keep it in the main loop.
+- **Broad exploration** (unfamiliar subsystem, many candidate files, naming conventions
+  unknown): delegate to an **`Explore` agent with `model: haiku`** and ask for a structured
+  map (files → roles → key symbols). This keeps file dumps out of the expensive main context;
+  you need the conclusions, not the excerpts.
 
 Identify and record in the run-log:
 - Files to modify (be specific; list them)
@@ -155,6 +174,10 @@ npm test
 
 The Phase 3 gate tests must now be green. Record the result in the run-log.
 
+Run every step with **filtered output** (e.g. `cargo clippy ... 2>&1 | grep -cE "^(error|warning)"`,
+`cargo test ... 2>&1 | grep -E "test result:|FAILED"`); only on failure re-run the failing step
+with enough context to diagnose. Full pipeline output belongs in a file, not in context.
+
 **Outcome:**
 - All steps pass → **Phase 6 (Review)**
 - Any step fails → note every failure → **Fix Phase** → return to Phase 5
@@ -164,13 +187,20 @@ The Phase 3 gate tests must now be green. Record the result in the run-log.
 ## Phase 6 — Review (advisory checker layer)
 
 Spawn these agents with the Agent tool, **in parallel** (one message, multiple Agent calls).
-Each agent needs the worktree `git diff` of changed files as context.
+Point each agent at the worktree and tell it to run `git -C <worktree> diff` itself — do not
+paste the diff into the prompt. **Pin each agent's `model` explicitly** (they otherwise
+inherit the session model, multiplying cost):
 
-1. **`pr-review-toolkit:code-reviewer`** — changed files, CLAUDE.md compliance, correctness bugs.
-2. **`pr-review-toolkit:silent-failure-hunter`** — catch blocks, fallback logic, `unwrap_or`,
-   `getOrElse`, error-swallowing patterns. Skip if the diff contains no error handling code.
-3. **`pr-review-toolkit:pr-test-analyzer`** — do the gate tests actually cover every acceptance
-   criterion? Are edge cases tested?
+1. **`pr-review-toolkit:code-reviewer`** — `model: opus` — changed files, CLAUDE.md compliance,
+   correctness bugs. Deep-reasoning verification (locking, semantics parity, merge-resolution
+   correctness) — the one agent that earns a strong model.
+2. **`pr-review-toolkit:silent-failure-hunter`** — `model: sonnet` — catch blocks, fallback
+   logic, `unwrap_or`, `getOrElse`, error-swallowing patterns; instruct it to compile-check
+   non-default feature sets (`--no-default-features`) when cfg-gated code changed. Skip if the
+   diff contains no error handling code. (Not haiku: this agent's findings are historically
+   the highest-severity — cfg-scope breaks, masked failures — and need real reasoning.)
+3. **`pr-review-toolkit:pr-test-analyzer`** — `model: sonnet` — do the gate tests actually
+   cover every acceptance criterion? Are edge cases tested?
 
 The verify pipeline is the objective gate; review findings are **advisory**. Classify:
 
@@ -204,7 +234,11 @@ Remaining Blockers Report (end of file) and stop.
 
 ## Phase 7 — Simplify
 
-Spawn **`pr-review-toolkit:code-simplifier`** on the diff. Apply suggestions that:
+Spawn **`pr-review-toolkit:code-simplifier`** — `model: haiku` — pointed at the worktree diff
+(it reads the diff itself). Haiku is safe here: its suggestions are triaged by the main loop
+and every applied one is re-verified by the full pipeline, so a bad suggestion cannot ship.
+Instruct it to return a ranked list (file, location, before → after) and NOT to apply edits.
+Apply suggestions that:
 - Reduce lines without changing behaviour
 - Improve naming clarity
 - Remove duplication
