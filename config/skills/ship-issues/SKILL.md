@@ -168,7 +168,8 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
 5. **Order** the worklist: explicit arg order if given; else ascending issue number. If an issue
    body says "depends on #X", put #X earlier. Keep expanded-umbrella children in their tranche order.
 6. **Write the run-log** at `.rift-ship/worklist.md` (create the dir): one row per issue with
-   columns `issue | title | base | status | pr | notes`, all `status=pending`. This file is the
+   columns `issue | title | base | status | pr | docs | notes` (fill `docs` at 1c-docs), all
+   `status=pending`. This file is the
    durable source of truth for resume; update it after every phase transition.
 7. **Announce the plan**: print the ordered worklist (noting any umbrella expansions) and the mode
    (merge vs `--no-merge`). Then begin the loop.
@@ -228,9 +229,30 @@ avoids conflicts:
 
 Then invoke the **`fix-issue`** skill for N **inline** (so it runs on the Opus session model). It
 runs verifier-first in an isolated worktree with a hard cap of 3 fix cycles.
-- **Success** (verify gate green, no unresolved review blockers) → proceed to 1d.
+- **Success** (verify gate green, no unresolved review blockers) → proceed to 1c-docs.
 - **Failure** (cap exhausted / Remaining Blockers Report) → set `status=blocked`, copy the blockers
   summary into the run-log notes, and `continue`. Do **not** open a PR for broken work.
+
+**1c-docs — Documentation is part of "done" (before you leave 1c).** A change that ships new or
+changed behaviour is not complete until the docs a user or maintainer would consult are updated **in
+the same worktree, so the docs land in the same PR** as the code. `fix-issue` often does this when
+the issue's acceptance criteria name it, but its coverage is issue-dependent — so treat docs as an
+explicit gate here, not an afterthought. In the worktree, before 1d:
+
+- **Decide what's relevant.** Map the change to the docs that describe it: user-facing docs
+  (`docs/`, `README`, guides, a DSL/API reference), the public API's own doc comments/Scaladoc, a
+  `CHANGELOG`/release notes if the repo keeps one, `--help`/usage text for a CLI, and config/env
+  references for new knobs or flags. Look at how *sibling* features are documented and match that
+  home and depth (e.g. a new combinator gets an entry alongside the existing ones, a new env var
+  joins the existing table) rather than inventing a new location.
+- **Update or add it**, then re-run the verify pipeline (docs can break a docs-build/link-check or a
+  fenced code sample that's compiled) so the docs change is covered by the same green gate as the
+  code. Keep examples runnable and consistent with the shipped API.
+- **Exempt** only genuinely doc-less changes — a pure-internal refactor, a test-only fix, a CI/build
+  tweak with no user-facing surface. When you exempt, say so in the run-log (`docs: n/a — <why>`);
+  don't skip silently.
+- Record what you touched in the run-log (`docs: <files>`), and include the doc change in the 1d PR
+  body so a reviewer sees the behaviour and its documentation together.
 
 ### 1d — Commit, push, open the PR (Haiku subagent)
 Delegate **`commit-push-pr`** for N's worktree/branch to a **Haiku subagent**, targeting the base
@@ -280,8 +302,12 @@ When every issue is in a terminal status (`merged` / `pr-open` / `deferred(<mode
 `needs-design` / `blocked` / `pr-red` / `umbrella-expanded` / `umbrella-done` / `umbrella-manual`),
 print a summary table:
 
-| Issue | Title | Base | Status | PR | Notes |
-|-------|-------|------|--------|----|-------|
+| Issue | Title | Base | Status | PR | Docs | Notes |
+|-------|-------|------|--------|----|------|-------|
+
+The **Docs** column records the doc outcome from 1c-docs for each implemented issue — the files
+touched, or `n/a — <why>` when genuinely exempt. It makes the "docs are part of done" gate auditable
+at a glance; a merged issue with a blank Docs cell is a smell to flag, not to hide.
 
 Then, grouped for action:
 - **Merged**: PR links.
@@ -299,6 +325,48 @@ Then, grouped for action:
 State counts plainly (e.g. "7 issues: 4 merged, 2 deferred (Fable), 1 needs-design; 3 findings
 filed (#331-#333, held for triage)"). Never report an issue as merged that `babysit-prs` didn't
 actually merge; never report `pr-open` as done.
+
+---
+
+## Phase 2.5 — Refresh the cross-repo delivery dashboard (if one is configured)
+
+Some programs keep a **live cross-repo dependency dashboard** — a folder of one-note-per-issue
+records plus a graph/board that answers *"what's next, and what's blocked by what."* When the run
+touched such a program, refresh it so it never goes stale. **Skip this phase entirely if no dashboard
+is configured** (no `dashboard.path` and no discoverable dashboard note) — do not invent one.
+
+Discover the dashboard from, in order: an explicit `dashboard.path` in the repo's `CLAUDE.local.md`;
+else a `.rift-ship/dashboard-path` file; else a note titled *"Delivery Dashboard"* / a `db/` issue
+folder already linked from the repo. (For the Rift program the dashboard lives in the user's Obsidian
+vault at `tasks/rift-enterprise/issues/` — `delivery-dashboard.md`, `cross-repo-issue-dependency-graph.md`,
+and `db/*.md`, one note per issue with `status`/`priority`/`blocked_by`/`unblocks`/`kind` frontmatter.)
+
+Delegate the refresh to a **Haiku subagent** (mechanical; give it the dashboard path + this run's
+outcomes). It must:
+
+1. **Add new findings.** For every issue filed in **1f** (`agent-found`), create/refresh its db note
+   with `status: blocked|ready` and the `blocked_by`/`unblocks` edges you observed.
+2. **Update statuses from this run.** Merged issue → remove its db note **iff** no *open* issue still
+   references it in `blocked_by`/`unblocks` (a resolved leaf); if it's still referenced, keep it as
+   `status: done` so the edge stays legible. `blocked`/`pr-red` → set `status: blocked` with the
+   concrete blocker in `blocked_by`. New PR not yet merged → `status: in-flight`.
+3. **Model release/consume gates — a merge is not a delivery.** Shipping an issue often does **not**
+   unblock a downstream repo: the library must be **published** and the consumer must **bump its pin**
+   (e.g. rift-conformance pins a `zio-bdd` version). Keep these as first-class gate nodes
+   (`kind: release` for a publish, `kind: consume` for a pin-bump) between the code node and its
+   downstream. When an issue merges but its downstream is still on the old published version, set the
+   downstream to `status: awaiting-release` (**not** `ready`) and point its `blocked_by` at the gate.
+   Close/remove a gate only when the publish/bump actually happened.
+4. **Garbage-collect.** Drop db notes for issues that are closed **and** unreferenced by any open
+   issue; leave everything still on someone's critical path.
+5. **Stamp it.** Update the `Last updated:` footer (date + one line: e.g. "N merged, M findings, gates
+   refreshed") in the dashboard note and the graph note. The Dataview/board views re-render from the
+   db frontmatter automatically — only hand-curated mermaid needs a manual nudge if the *spine*
+   changed (new cross-repo edge), which you note for the human rather than redrawing blindly.
+
+Report the dashboard delta in the Phase 2 output (e.g. "dashboard: +2 findings, 3 leaves GC'd,
+1 release gate opened"). If the dashboard path is unreachable (e.g. a headless run with no vault),
+say so and skip — never fail the run over dashboard upkeep.
 
 ---
 
