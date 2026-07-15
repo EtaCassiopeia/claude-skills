@@ -181,6 +181,43 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
 For each issue **N** with a non-terminal status, run steps a–g. On any hard failure, set the
 issue's status, write the run-log, and `continue` to the next issue — never abort the whole loop.
 
+### 1·coord — Coordinator: pipeline the CI waits (repo-aware, decide ONCE up front)
+
+Implementation is **always serial** — `fix-issue` runs inline on the session model, one issue at a
+time. But the ~per-PR **CI wait** in step 1e is dead time in a strictly-serial loop: on a repo whose
+CI takes 15+ min, blocking on each merge before starting the next issue wastes that window. The win
+is to overlap it — implement issue N+1 *while* N's CI runs — but only when it actually pays off and
+won't trigger a rebase cascade. So before the loop, the coordinator makes **one** decision:
+
+**Measure two facts about the target repo:**
+1. **CI duration** — recent successful run wall-clock: `gh run list --limit 10 --json name,conclusion,startedAt,updatedAt` (or observe the *first* PR you open this run). Call it long if the required checks take **≳ 8–10 min**, short if **≲ a few min**.
+2. **Does merging require an up-to-date branch / required status checks?** Check both classic protection (`gh api repos/{o}/{r}/branches/{base}/protection` → `required_status_checks.strict`) and **rulesets** (`gh api repos/{o}/{r}/rulesets` then the ruleset detail → any `required_status_checks` rule with `strict_required_status_checks_policy`). "Strict/up-to-date required" means every merge invalidates the other open PRs' mergeability → forced rebase + CI re-run for each.
+
+**Choose the mode:**
+- **Strictly serial** (default; the safe choice) when CI is **short**, OR the repo **requires
+  up-to-date branches / required status checks**. Run 1a–1e inline per issue, babysit each PR to
+  merged **before** starting the next (as written below). Short CI ⇒ the coordination isn't worth
+  the complexity; strict-branch ⇒ pipelining just moves the wait into a rebase cascade. Say so in
+  the run-log (`pipeline: off — CI ~3m` / `pipeline: off — strict branches`).
+- **Pipelined fan-out** when CI is **long** AND up-to-date is **not** required AND required status
+  checks are absent/bypassable (you're an admin). Then:
+  1. Run **1a–1d serial and inline** per issue (triage → base → implement → commit-push-pr). Opening
+     the PR starts its CI. Do **not** run 1e yet — move straight to the next issue so the CIs stack
+     up and run concurrently.
+  2. After the last issue's PR is open, do a **merge sweep**: merge the PRs one at a time in worklist
+     order (1e per PR). Because up-to-date isn't required, merging one does **not** invalidate the
+     others — no rebase cascade. The only cross-PR conflict is a **shared file**, almost always
+     `CHANGELOG.md`: resolve it by rebasing that one PR onto the new base and keeping *both* entries
+     (place each issue's entry under a distinct changelog subsection — `Fixed`/`Security`/`Changed` —
+     so git 3-way usually auto-merges them and no rebase is even needed). Since CI isn't merge-
+     required here, a CHANGELOG-only rebase can merge as soon as it's mergeable without re-waiting a
+     full CI re-run (the code was already green pre-rebase).
+  3. Keep the merge sweep **serial** — never fan out concurrent background merges that rebase onto a
+     moving base (they race). Record `pipeline: on — CI ~15m, fan-out N PRs, merge sweep`.
+
+Never pipeline the *implementation* (fix-issue is inline/serial by construction), and never merge a
+red or unmergeable PR. When in doubt, stay strictly serial — it is always correct, just slower.
+
 ### 1a — Triage & route (Haiku subagent)
 Delegate `triage-issue` for N to a **Haiku subagent**. Use its verdict to:
 1. **Screen out non-implementable issues** — if triage says the issue needs human design or is a
@@ -261,6 +298,9 @@ commit message (no Claude attribution in the body), PR title = issue title, body
 milestone. Record the PR number/URL in the run-log; set `status=pr-open`.
 
 ### 1e — Babysit to merged (Haiku subagent) — default
+**In pipelined mode (1·coord), 1e is deferred:** don't babysit here — move to the next issue and run
+all the 1e merges together in the end-of-run merge sweep. In strictly-serial mode, run 1e inline now.
+
 Unless `--no-merge`, delegate **`babysit-prs`** for this PR to a **Haiku subagent** (forwarding
 `--admin-merge` if it was passed). It watches CI, fixes-on-fail on the PR's own head up to its own
 3-cycle cap, and merges when green using the merge method matching the branch shape. babysit reads
@@ -289,6 +329,39 @@ Findings are **held for triage**: they carry `needs-triage`, so Phase 0 excludes
 `--all` run until you promote them. This prevents a runaway find→fix→find loop while still capturing
 everything. Record filed/duplicate finding numbers in the run-log notes for this issue.
 
+### 1f-cross — Downstream-consumer impact (only when the repo declares consumers)
+
+An engine/library repo is rarely the last stop: SDKs, conformance suites, sample corpora and
+example harnesses consume its wire schemas, ABI, config format and CLI. A change can be perfectly
+green here and still leave those repos stale — or leave its own value unrealized. **Skip this step
+entirely when the repo declares no downstream consumers** (see discovery below); do not invent them.
+
+**Discovery.** Read the repo's `CLAUDE.local.md` / `CLAUDE.md` for a *Downstream consumers* section
+listing consumer repos and the surfaces each one consumes. No section → skip, silently.
+
+**Cheap gate first.** Most issues touch nothing a consumer sees. Compare the merged diff's files
+against the declared surfaces; if none match, record `downstream: none — no consumed surface
+touched` and move on. Only on a match do the deeper analysis below (delegate it to a **Haiku
+subagent**: give it the diff, the declared consumer map, and these rules).
+
+**The trap this exists to catch: "additive" is not "nothing to do".** A backward-compatible
+addition breaks no consumer *and* is invisible to every one of them until they adopt it — so the
+feature ships and nobody uses it. Judge each consumer on two separate questions:
+
+- **Compatibility** — does anything there *break* or silently misbehave? (A schema gaining a field
+  under `deny_unknown_fields` means a new-SDK-on-old-engine call is a hard error, so adoption must
+  be version-gated. A new error code/status a consumer maps. A changed response body.)
+- **Adoption** — where does this change's *value* actually land? If the point of the work is that a
+  consumer can now delete a workaround, that deletion is the deliverable, and it lives over there.
+
+For each real item, file an issue **in that repo** (`gh issue create --repo <owner>/<name>`), with
+the same discipline as 1f: dedup first, state the engine version/PR that introduced it, say plainly
+whether it is *required* (compat) or *optional* (adoption), and label it for human triage. Never
+implement it in this run — different repo, different gate, different review.
+
+Record one line per consumer in the run-log (`downstream: rift-java #12 (adoption), rift-go none`),
+and surface it in the Phase 2 report.
+
 ### 1g — Checkpoint
 Update `.rift-ship/worklist.md`. This run-log + live GitHub state is enough to resume after
 compaction: a re-invoke re-reads it, re-prunes against open PRs/merged issues, and picks up the
@@ -302,12 +375,16 @@ When every issue is in a terminal status (`merged` / `pr-open` / `deferred(<mode
 `needs-design` / `blocked` / `pr-red` / `umbrella-expanded` / `umbrella-done` / `umbrella-manual`),
 print a summary table:
 
-| Issue | Title | Base | Status | PR | Docs | Notes |
-|-------|-------|------|--------|----|------|-------|
+| Issue | Title | Base | Status | PR | Docs | Downstream | Notes |
+|-------|-------|------|--------|----|------|------------|-------|
 
 The **Docs** column records the doc outcome from 1c-docs for each implemented issue — the files
 touched, or `n/a — <why>` when genuinely exempt. It makes the "docs are part of done" gate auditable
 at a glance; a merged issue with a blank Docs cell is a smell to flag, not to hide.
+
+The **Downstream** column does the same for 1f-cross: the consumer issues filed (`rift-java #12`),
+`none — no consumed surface touched`, or `n/a` in a repo that declares no consumers. Same reasoning:
+a merged issue that changed a consumed schema and shows a blank cell is a smell.
 
 Then, grouped for action:
 - **Merged**: PR links.
@@ -321,6 +398,9 @@ Then, grouped for action:
 - **Findings filed** (`agent-found` + `needs-triage`): the new issue numbers filed during the run,
   noting they are held for your triage — promote (remove `needs-triage`) to make them eligible for a
   future `--all` run.
+- **Downstream follow-ups filed** (1f-cross): grouped by consumer repo, each marked *required*
+  (compat) or *optional* (adoption). Call out any *required* one explicitly — that is a consumer
+  that is broken or version-gated until it lands, not a nice-to-have.
 
 State counts plainly (e.g. "7 issues: 4 merged, 2 deferred (Fable), 1 needs-design; 3 findings
 filed (#331-#333, held for triage)"). Never report an issue as merged that `babysit-prs` didn't
