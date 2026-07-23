@@ -86,22 +86,41 @@ get this recommendation up front.)
 
 ## Phase 1 — Isolate (Worktree Setup)
 
-Run the loop in a dedicated git worktree so changes never touch the user's current working tree:
+**The user's checkout is never touched — not its files, not its branch.** All work happens in a
+dedicated worktree, cut from the **remote base ref**, never from whatever the current checkout
+happens to have checked out:
 
 ```bash
-git worktree add .claude/worktrees/issue-<N> -b fix/issue-<N>
+git fetch origin
+git worktree add .claude/worktrees/issue-<N> -b <type>/issue-<N> origin/<base>
 ```
 
+- **`origin/<base>` is mandatory, not decoration.** Omitting it branches from the current
+  checkout's HEAD — so if the user left that on some unrelated feature branch, the fix silently
+  inherits it and the PR carries someone else's commits. Branching from the remote ref makes the
+  new branch independent of local state. `<base>` is the repo's default branch unless a
+  base-branch rule says otherwise (see `/ship-issues` Phase 1b; a caller may pass one in).
+- **Never `git switch` / `git checkout` / `git reset` in the main checkout.** It stays on whatever
+  branch the user left it on. There is no reason to touch it: you branch from `origin/<base>` and
+  work via `git -C <worktree>`. A local base branch being stale is irrelevant — you never read it.
 - Choose the branch prefix from the issue labels per convention (`feat/`, `fix/`, `refactor/`,
-  `test/`); default to `fix/`.
-- Record the worktree path and branch name in the run-log.
+  `test/`); default to `fix/`. Follow the repo's branch-naming rule if it has one (e.g. rift's
+  `CLAUDE.local.md` mandates `<type>/rift-<issue>-<slug>`).
+- Record the worktree path, branch name, and the base commit it was cut from in the run-log.
 - **All** subsequent file edits, builds, tests, and git commands run with the worktree as the
   working directory. Prefer `git -C .claude/worktrees/issue-<N> ...` and run `cargo`/`sbt`/`npm`
   with that directory as the working directory — avoid bare `cd` (it can trigger a permission
   prompt).
-- **Graceful fallback:** if this is not a git repo, or `worktree add` fails (e.g. branch
-  exists), fall back to the current working tree and note the degraded isolation in the run-log.
-  Do not hard-fail.
+- **If `worktree add` fails, STOP — do not fall back to the current working tree.** Falling back
+  writes the change into the user's checkout, which is the one outcome this phase exists to
+  prevent; a "degraded isolation" note does not make that acceptable. Diagnose the specific cause
+  and fix it:
+  - *branch already exists* → reuse the existing worktree if it is this issue's (check
+    `git worktree list`), else pick the next free name or delete the stale branch;
+  - *worktree path already exists* → `git worktree remove <path>` if it is a leftover from a
+    merged run, else use a fresh path;
+  - *not a git repo* → report that and stop; there is nothing to isolate and nothing to PR.
+- After the PR merges, clean up: `git worktree remove .claude/worktrees/issue-<N>`.
 
 ---
 
@@ -248,6 +267,22 @@ inherit the session model, multiplying cost):
    the highest-severity — cfg-scope breaks, masked failures — and need real reasoning.)
 3. **`pr-review-toolkit:pr-test-analyzer`** — `model: sonnet` — do the gate tests actually
    cover every acceptance criterion? Are edge cases tested?
+4. **Language best-practices / anti-pattern lens** — `general-purpose`, `model: sonnet` — idioms,
+   anti-patterns, and code style graded against the repo's **language skill**, NOT correctness
+   (that's agent #1). The other three agents catch bugs, swallowed errors, and coverage gaps but
+   none enforce language idiom, so this is the pass that keeps the diff *idiomatic*, not just
+   correct. The brief MUST tell the agent to invoke the matching skill via the Skill tool **first**,
+   then review the `git -C <worktree> diff` against it. Pick the skill by the diff's file types:
+   - `.rs` → `/rust-best-practices` (error-handling idioms, ownership/borrowing, newtypes,
+     `unwrap`/`clone` overuse, `#[must_use]`, `thiserror` vs `anyhow` at boundaries)
+   - `.scala` / `build.sbt` → `/scala3-best-practices` (⁠`opaque type` vs `AnyVal`, `given`/`using`
+     vs `implicit`, `enum` vs sealed hierarchies, visibility); **also** `/zio-best-practices` when
+     the diff touches `zio.*` (Service Pattern 2.0, typed errors, `Cause`/`Exit`, `Schedule`), and
+     `/fp-patterns` for typeclass/ADT/effect-composition design
+   - other languages → idiomatic judgment, noting no skill was available
+   Same Blocker/Non-blocker classification as the others; **style-only nits are Non-blockers**
+   unless they also violate a CLAUDE.md rule. Skip this agent for trivial no-logic diffs (pure
+   docs/config, or a one-line mechanical change).
 
 The verify pipeline is the objective gate; review findings are **advisory**. Classify:
 
@@ -383,8 +418,14 @@ worktree: .claude/worktrees/issue-<N>   branch: fix/issue-<N>
 
 - **Do not create a PR** and **do not push** — the ship report is the handoff; the user runs
   `/commit-commands:commit-push-pr` from the worktree.
-- **All work happens in the worktree** (or the noted fallback tree); update the run-log every
-  phase and every cycle.
+- **All work happens in the worktree — always, with no fallback.** Cut it from `origin/<base>`, never
+  from the current HEAD. If the worktree cannot be created, stop and say why; never write the change
+  into the user's checkout instead.
+- **Never move the user's checkout.** No `git switch`/`checkout`/`reset`/`merge` outside the
+  worktree — their working directory stays on whatever branch they left it on, with whatever
+  uncommitted work is in it. `git fetch` is the only git write the main repo ever needs, and it only
+  touches remote refs.
+- Update the run-log every phase and every cycle.
 - **Do not modify** files outside the Phase 2 list.
 - **Do not add features** beyond what the issue states.
 - **Stop at 3 cycles** — surface blockers instead of shipping a failing gate.

@@ -47,9 +47,14 @@ rules, isolate failures so one bad issue never blocks the rest, and produce an a
 - **Serial, not parallel.** One issue at a time. `fix-issue` isolates each in its own git worktree,
   but PRs land on shared base branches; serial keeps merges conflict-free and the run legible. Do
   **not** fan out issues to parallel subagents.
-- **Every issue starts from a fresh base.** Before implementing an issue, the base is fetched and
-  fast-forwarded to the remote tip (Phase 1c), so the new worktree includes every previously-merged
-  PR. Combined with serial + merge-before-next, each issue builds on the latest code and conflicts
+- **The user's checkout is never touched.** Every issue is implemented in its own worktree under
+  `.claude/worktrees/`, cut from `origin/<base>`. The loop never runs `git switch`/`checkout`/
+  `reset`/`merge` in the main working directory: it stays on whatever branch the user left it on,
+  with their uncommitted work intact. `git fetch` is the only git write the main repo needs.
+- **Every issue starts from a fresh base.** Before implementing an issue, `origin/<base>` is fetched
+  and the worktree is cut **from that remote ref** (Phase 1c), so it includes every previously-merged
+  PR — and so it does NOT inherit whatever the user's checkout happens to be on. Combined with
+  serial + merge-before-next, each issue builds on the latest code and conflicts
   are avoided rather than fought.
 - **Failure is isolated, never fatal to the batch.** If an issue's `fix-issue` exhausts its 3-cycle
   cap, or its PR can't be driven green by `babysit-prs`, record the blocker and **move to the next
@@ -243,22 +248,25 @@ in any repo, so don't hardcode rift's rules):
 
 ### 1c — Sync the base, then implement (Opus, inline)
 
-**First, pull the base up to the remote tip so the new work is cut from the latest code.** Because
-the loop is serial and (by default) merges each PR before the next issue starts, every
-previously-shipped PR is already on the remote base by now — bring it in so `fix-issue` branches
-from it, not a stale local copy. This is what keeps each issue building on all prior merged work and
-avoids conflicts:
+**Fetch the remote tip so the new work is cut from the latest code — but never touch the user's
+checkout.** Because the loop is serial and (by default) merges each PR before the next issue starts,
+every previously-shipped PR is already on the remote base by now; branching from `origin/<base>` is
+what picks it up, and it is also what keeps the user's working directory out of the blast radius:
 
 - `git fetch origin` so `origin/<base>` is current (this is the remote tip that includes every
-  merged PR).
-- Ensure `fix-issue` cuts its **isolated worktree directly from `origin/<base>`** — e.g.
-  `git worktree add <path> -b <branch> origin/<base>`. Branching from the remote ref sidesteps any
-  stale local base entirely; never branch a new issue off a stale local base or off another issue's
-  branch.
-- Optionally fast-forward the local base for cleanliness: `git switch <base> && git merge --ff-only
-  origin/<base>` (only if `<base>` is checked out and fast-forwards). Do **not** `git reset --hard`
-  the base — it's unnecessary (you branch from `origin/<base>` directly) and is denied by the safety
-  backstop; there's nothing to reset since ship-issues never commits to a base branch.
+  merged PR). Fetch is read-only — it updates remote refs and nothing else.
+- Ensure `fix-issue` cuts its **isolated worktree directly from `origin/<base>`**:
+  `git worktree add <path> -b <branch> origin/<base>`. The explicit `origin/<base>` is mandatory —
+  without it the worktree branches from whatever the user's checkout has checked out, so a leftover
+  feature branch silently becomes the base and its commits ride along into the PR.
+- **Never `git switch` / `git checkout` / `git reset` / `git merge` in the user's checkout.** It
+  stays on whatever branch they left it on — the loop has no business moving it. Do not
+  "fast-forward the local base for cleanliness": it is not needed (you branch from `origin/<base>`,
+  never from the local base), it silently changes the branch under the user's editor, and it fails
+  outright the moment their tree is dirty. A stale local base is harmless because nothing ever
+  reads it.
+- The **only** writable working directories this loop has are the per-issue worktrees under
+  `.claude/worktrees/`. If a step seems to require editing the user's checkout, that step is wrong.
 
 > Freshness holds only when PRs actually merge before the next issue — i.e. the default merge mode.
 > Under `--no-merge`, earlier PRs stay open, so a later issue's base won't include them; that's
@@ -481,3 +489,6 @@ loop is built to make that a **pause, not a loss**:
   that per-issue retries won't fix. List the remaining `pending` issues.
 - Never force-push, never touch a branch that isn't an issue's own head, never merge a PR that isn't
   green and mergeable.
+- Never move or dirty the user's checkout: no `git switch`/`checkout`/`reset`/`merge` outside a
+  per-issue worktree, and no implementing an issue in the main working directory when its worktree
+  cannot be created — stop and report instead.
