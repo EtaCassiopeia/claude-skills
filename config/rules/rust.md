@@ -12,6 +12,27 @@ path_scope:
 - Applications: use `anyhow` for ergonomic error propagation
 - Never use `.unwrap()` in production code — use `?`, `.expect("reason")`, or match
 - Prefer `?` operator over manual match for error propagation
+
+### Silent-fallback (swallow) taxonomy
+
+`.ok()` / `unwrap_or_else(|_| default)` / `unwrap_or_default()` on a `Result` silences the
+failure. Before writing one, name which category it is — and when reviewing, flag any that
+can't be named (this exact shape shipped as rift #606/#608/#610/#611: serde failure → `200 OK`
+`{}`; a config block silently dropped; a security gate failing open; a 200-status "error"
+fallback):
+
+- **Domain-optional parse (OK):** the input may legitimately not be that type — absence is a
+  domain value, not an error (e.g. "is this request body JSON?"). Comment it if non-obvious.
+- **Terminal last-resort (OK only if BOTH hold):** the final fallback of an error path, where
+  (1) the fallback payload is infallible by construction AND (2) status/severity stays correct —
+  a fallback that answers `200` for a failure is a bug even at the last resort (`Response::new`
+  defaults to 200).
+- **Data-path swallow (NEVER):** config, user payload, or response data whose parse/serialize
+  failure becomes a silent default. Propagate, map to a correct error response, or at minimum
+  log at error level. Wrong-but-quiet is worse than loud failure: it surfaces in the *client's*
+  decoder with nothing server-side to correlate.
+- **Security classifiers fail closed:** a gate that cannot parse what it is classifying treats
+  it as the dangerous class, never the safe one.
 - Define domain error enums: one per module/crate boundary
 - Use `#[from]` for automatic conversions in thiserror enums
 

@@ -102,8 +102,32 @@ let result = expensive_map.iter().find(|..| ..).map(|(k, v)| v.clone());
 - `.unwrap()` or `.expect()` in production paths (document why it's safe if you must)
 - Use `Box<dyn Error>` as a library error type (loses type info for callers)
 - Create one monolithic error enum for an entire crate; scope errors to modules
+- Silence a `Result` on a data path with `.ok()` / `unwrap_or_else(|_| default)` /
+  `unwrap_or_default()` — the **swallow pattern**. Failure degrades into wrong-but-quiet
+  behavior that surfaces far from the cause (e.g. a serde failure served as `200 OK {}`; a
+  config block silently dropped; a security gate failing open). Only two silencing shapes are
+  legitimate, and each deserves a comment naming it:
+  1. **Domain-optional parse** — the input may genuinely not be that type; absence is a domain
+     value ("is this body JSON?").
+  2. **Terminal last-resort** — the final fallback of an error path, valid only if the fallback
+     payload is infallible by construction AND keeps a correct status/severity
+     (`Response::new(..)` defaults to `200` — a 200 "error" fallback is a bug).
+  Everything else: propagate, map to a correct error response, or log at error level.
+  Security classifiers **fail closed** — unparseable input classifies as the dangerous class.
 
 ```rust
+// ANTI-PATTERN (swallow): parse failure silently drops the whole block, serves 200
+let parsed = serde_json::from_value::<Behaviors>(v).ok();          // gone, no log
+
+// GOOD: loud degradation — the failure is visible and correctly classified
+let parsed = match serde_json::from_value::<Behaviors>(v) {
+    Ok(b) => Some(b),
+    Err(e) => {
+        tracing::error!(error = %e, "malformed _behaviors block dropped");
+        None
+    }
+};
+
 // ANTI-PATTERN: library with Box<dyn Error>
 pub fn load(path: &str) -> Result<Config, Box<dyn Error>> { .. }
 
