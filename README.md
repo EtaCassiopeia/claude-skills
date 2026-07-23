@@ -16,6 +16,7 @@ Includes library-specific skills for [zio-openfeature](config/skills/zio-openfea
 | Settings | `config/settings.json` | Plugins, hooks, and permissions |
 | MCP Servers | `config/mcp-servers.json` | MCP server registrations (cargo-mcp, rust-analyzer-mcp) |
 | graphify | `config/graphify/` | Knowledge-graph git hooks, worktree seeding, design-drift report ([guide](config/graphify/README.md)) |
+| Global gitignore | `config/gitignore_global` | Ignore rules applied to every repo — keeps agent and knowledge-graph artifacts out of `git status` |
 
 ## Prerequisites
 
@@ -40,7 +41,7 @@ The `setup.sh` script is idempotent — safe to re-run anytime (e.g., after `git
 
 1. **Preflight** — verifies `claude`, `cargo`, `python3` are available and `~/.claude/` exists
 2. **Create directories** — ensures all required directories exist under `~/.claude/`
-3. **Symlink files** — links `~/.claude/{CLAUDE.md, rules, agents, skills}` to files in this repo, and `~/.claude/graphify` to `config/graphify/`. If a regular file or directory exists, it's backed up first. Correct symlinks are skipped.
+3. **Symlink files** — links `~/.claude/{CLAUDE.md, rules, agents, skills}` to files in this repo, `~/.claude/graphify` to `config/graphify/`, and `~/.gitignore_global` to `config/gitignore_global` (also setting `git config --global core.excludesFile`, since the symlink alone does nothing). If a regular file or directory exists, it's backed up first. Correct symlinks are skipped.
 4. **Merge settings.json** — deep-merges `config/settings.json` into `~/.claude/settings.json`. Repo values win on conflicts; any extra user-added entries are preserved. Backs up before writing.
 5. **Register MCP servers** — patches `~/.claude.json` to add MCP server entries. Only touches the `mcpServers` key; all other data (telemetry, state) is untouched. Backs up before writing.
 6. **Install MCP binaries** — runs `cargo install` for `cargo-mcp` and `rust-analyzer-mcp` (skips if already installed)

@@ -1,0 +1,43 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Build artifacts
+target/
+
+# AI assistant files
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
+**/.claude/settings.local.json
+
+# graphify knowledge graph (generated; ~54 MB, rebuilt from source on demand)
+graphify-out/
+.graphifyignore
+
+# CocoIndex Code (ccc)
+.cocoindex_code/
+.secrets.zsh
+*.secrets.zsh
+
+# ship-issues orchestrator run-log
+.rift-ship/
+
+# per-issue git worktrees
+.git-worktrees/

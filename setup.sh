@@ -182,6 +182,20 @@ symlink_dir() {
 
 symlink_dir "$CONFIG_DIR/graphify" "$CLAUDE_DIR/graphify"
 
+# Global gitignore. Tracked here so a new machine inherits the same ignore rules —
+# without it, agent and knowledge-graph artifacts (CLAUDE.md, .claude/,
+# graphify-out/, .graphifyignore, .git-worktrees/) show up as untracked noise in
+# every repo you touch.
+symlink_file "$CONFIG_DIR/gitignore_global" "$HOME/.gitignore_global"
+
+# The symlink alone does nothing unless git is told to read it.
+if [ "$(git config --global core.excludesFile || true)" = "$HOME/.gitignore_global" ]; then
+    skip "git core.excludesFile already set"
+else
+    git config --global core.excludesFile "$HOME/.gitignore_global"
+    ok "Set git core.excludesFile -> $HOME/.gitignore_global"
+fi
+
 # The hooks and scripts must stay executable through the symlink.
 chmod +x "$CONFIG_DIR"/graphify/hooks/* "$CONFIG_DIR"/graphify/bin/* 2>/dev/null || true
 
@@ -336,6 +350,15 @@ verify_symlink "$CLAUDE_DIR/skills/fp-advanced/SKILL.md"             "$CONFIG_DI
 verify_symlink "$CLAUDE_DIR/skills/scala-typelevel/SKILL.md"         "$CONFIG_DIR/skills/scala-typelevel/SKILL.md"
 verify_symlink "$CLAUDE_DIR/skills/cats-ecosystem/SKILL.md"          "$CONFIG_DIR/skills/cats-ecosystem/SKILL.md"
 verify_symlink "$CLAUDE_DIR/rules/scala-typelevel.md"                "$CONFIG_DIR/rules/scala-typelevel.md"
+verify_symlink "$CLAUDE_DIR/graphify"                                "$CONFIG_DIR/graphify"
+verify_symlink "$HOME/.gitignore_global"                             "$CONFIG_DIR/gitignore_global"
+
+if [ "$(git config --global core.excludesFile || true)" = "$HOME/.gitignore_global" ]; then
+    ok "git core.excludesFile OK"
+else
+    fail "git core.excludesFile not pointing at $HOME/.gitignore_global"
+    ERRORS=$((ERRORS + 1))
+fi
 
 # Verify settings keys
 python3 -c "
