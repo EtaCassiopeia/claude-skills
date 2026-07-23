@@ -1,0 +1,14 @@
+#!/bin/sh
+# post-commit: keep the knowledge graph in step with the code that was just committed.
+#
+# Backgrounded so `git commit` returns immediately; the refresh is AST-only (no LLM)
+# and takes ~6s on rift-enterprise. Always exits 0 — a graph failure must never make
+# a commit look like it failed.
+
+. "${GRAPHIFY_HOME:-$HOME/.claude/graphify}/lib/common.sh"
+
+graphify_enabled || exit 0
+
+( graphify_refresh ) >/dev/null 2>&1 &
+
+exit 0

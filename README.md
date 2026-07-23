@@ -15,6 +15,7 @@ Includes library-specific skills for [zio-openfeature](config/skills/zio-openfea
 | Skills | `config/skills/` | Slash commands and best-practice reference skills |
 | Settings | `config/settings.json` | Plugins, hooks, and permissions |
 | MCP Servers | `config/mcp-servers.json` | MCP server registrations (cargo-mcp, rust-analyzer-mcp) |
+| graphify | `config/graphify/` | Knowledge-graph git hooks, worktree seeding, design-drift report ([guide](config/graphify/README.md)) |
 
 ## Prerequisites
 
@@ -39,7 +40,7 @@ The `setup.sh` script is idempotent — safe to re-run anytime (e.g., after `git
 
 1. **Preflight** — verifies `claude`, `cargo`, `python3` are available and `~/.claude/` exists
 2. **Create directories** — ensures all required directories exist under `~/.claude/`
-3. **Symlink files** — links `~/.claude/{CLAUDE.md, rules, agents, skills}` to files in this repo. If a regular file exists, it's backed up first. Correct symlinks are skipped.
+3. **Symlink files** — links `~/.claude/{CLAUDE.md, rules, agents, skills}` to files in this repo, and `~/.claude/graphify` to `config/graphify/`. If a regular file or directory exists, it's backed up first. Correct symlinks are skipped.
 4. **Merge settings.json** — deep-merges `config/settings.json` into `~/.claude/settings.json`. Repo values win on conflicts; any extra user-added entries are preserved. Backs up before writing.
 5. **Register MCP servers** — patches `~/.claude.json` to add MCP server entries. Only touches the `mcpServers` key; all other data (telemetry, state) is untouched. Backs up before writing.
 6. **Install MCP binaries** — runs `cargo install` for `cargo-mcp` and `rust-analyzer-mcp` (skips if already installed)
@@ -132,6 +133,41 @@ The `settings.json` includes PostToolUse hooks that run automatically:
 - **Scala**: After any `Edit` or `Write` to a `.scala` file → `sbt compile` runs automatically
 
 This gives instant compilation feedback as Claude Code edits your code.
+
+## graphify Knowledge Graph
+
+Makes Claude navigate a knowledge graph instead of grepping raw files, keeps that graph fresh
+automatically, and reports drift between design docs and implementation.
+
+Opt-in **per repo** — sibling repos are unaffected:
+
+```sh
+cd <repo>
+/graphify . --mode deep                       # build the graph (semantic pass included)
+graphify claude install                       # CLAUDE.md + PreToolUse hook
+git config core.hooksPath ~/.claude/graphify/hooks
+```
+
+What you get:
+
+| | |
+|---|---|
+| `post-commit` / `post-checkout` | graph refreshes itself (~6s, AST-only, no API cost) |
+| `git worktree add` | new worktree inherits the base graph and extends it — no manual step |
+| `bin/graph-sync.sh` | refresh the main checkout after a PR merges on the remote |
+| `bin/design-sync.py` | advisory design ↔ implementation drift report |
+
+Two traps worth knowing before you enable it:
+
+- **`core.hooksPath` disables `~/.git-hooks` entirely.** If you keep a global `pre-push` guard
+  there, it is silently disarmed. `hooks/pre-push` delegates back to it — keep that delegation.
+- **AST extraction produces zero doc↔code edges.** A graph can look healthy (large node count,
+  docs indexed) while being unable to answer a single design-drift question. Only the semantic
+  pass creates those edges — verify it landed rather than assuming.
+- **graphify ignores your global gitignore.** Without a per-repo `.graphifyignore`, it indexes
+  `.claude/`, `node_modules/` and `target/` and the graph fills with noise — silently.
+
+Full guide, including verification steps: **[config/graphify/README.md](config/graphify/README.md)**
 
 ## Per-Project Scala/Metals Setup
 

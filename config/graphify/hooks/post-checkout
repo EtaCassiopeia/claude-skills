@@ -1,0 +1,26 @@
+#!/bin/sh
+# post-checkout: $1 = old HEAD, $2 = new HEAD, $3 = 1 for branch checkout / 0 for file checkout.
+#
+# `git worktree add` fires this hook with cwd set to the NEW worktree and $1 set to
+# the null sha (verified empirically). That null sha is what distinguishes "a fresh
+# worktree just appeared" from "someone switched branches", and it is the seam the
+# whole per-issue worktree flow hangs on — no skill or model step has to remember it.
+
+. "${GRAPHIFY_HOME:-$HOME/.claude/graphify}/lib/common.sh"
+
+graphify_enabled || exit 0
+
+# File checkout (git checkout -- <path>); the graph cannot have changed meaningfully.
+[ "$3" = "1" ] || exit 0
+
+NULL_SHA="0000000000000000000000000000000000000000"
+
+if [ "$1" = "$NULL_SHA" ]; then
+    # Fresh worktree or clone: inherit the base graph, then extend it for this branch.
+    "${GRAPHIFY_HOME:-$HOME/.claude/graphify}/bin/graph-seed.sh" >/dev/null 2>&1 &
+else
+    # Ordinary branch switch: the tree changed under us, so re-extract.
+    ( graphify_refresh ) >/dev/null 2>&1 &
+fi
+
+exit 0

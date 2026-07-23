@@ -149,6 +149,42 @@ symlink_file "$CONFIG_DIR/skills/triage-issue/SKILL.md"            "$CLAUDE_DIR/
 symlink_file "$CONFIG_DIR/skills/babysit-prs/SKILL.md"             "$CLAUDE_DIR/skills/babysit-prs/SKILL.md"
 symlink_file "$CONFIG_DIR/rules/scala-typelevel.md"                "$CLAUDE_DIR/rules/scala-typelevel.md"
 
+# symlink_dir <source_dir_in_repo> <target_under_home>
+# Directory variant: the graphify tooling is a tree of executables, and git's
+# core.hooksPath must point at a stable path, so we link the directory itself.
+symlink_dir() {
+    local src="$1"
+    local dst="$2"
+
+    if [ ! -d "$src" ]; then
+        fail "Source missing: $src"
+        ERRORS=$((ERRORS + 1))
+        return
+    fi
+
+    if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
+        skip "Already linked: $dst"
+        return
+    fi
+
+    # Existing real directory — back up rather than clobber
+    if [ -d "$dst" ] && [ ! -L "$dst" ]; then
+        local backup="${dst}.backup.$(date +%s)"
+        mv "$dst" "$backup"
+        info "Backed up: $dst -> $backup"
+    fi
+
+    [ -L "$dst" ] && rm "$dst"
+
+    ln -s "$src" "$dst"
+    ok "Linked: $dst -> $src"
+}
+
+symlink_dir "$CONFIG_DIR/graphify" "$CLAUDE_DIR/graphify"
+
+# The hooks and scripts must stay executable through the symlink.
+chmod +x "$CONFIG_DIR"/graphify/hooks/* "$CONFIG_DIR"/graphify/bin/* 2>/dev/null || true
+
 # ==============================================================================
 # 4. Merge settings.json (deep merge — repo values win, extras preserved)
 # ==============================================================================

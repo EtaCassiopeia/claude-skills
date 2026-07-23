@@ -1,0 +1,18 @@
+#!/bin/sh
+# pre-push: this file exists ONLY to preserve the user's global pre-push guard.
+#
+# Setting core.hooksPath to this directory makes git stop reading ~/.git-hooks
+# entirely. Without this delegation, the global hook that blocks pushes carrying
+# "Claude" in a commit message would be silently disarmed — a security-relevant
+# regression that would look like nothing at all had happened.
+#
+# Deliberately NOT wrapped in graphify_enabled: the guard must run even when
+# graphify is disabled or uninstalled.
+
+GLOBAL_PRE_PUSH="$HOME/.git-hooks/pre-push"
+
+if [ -x "$GLOBAL_PRE_PUSH" ]; then
+    exec "$GLOBAL_PRE_PUSH" "$@"
+fi
+
+exit 0
