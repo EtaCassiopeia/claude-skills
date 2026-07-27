@@ -140,23 +140,40 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
    - Bare integers — an explicit issue list (overrides `--all`).
 2. **Build the candidate set** from the Live Context *Open issues* (or an explicit list), applying
    `--label` if present.
-3. **Prune already-in-flight / done issues:**
-   - Skip an issue that already has an open PR that closes it (match *My open PRs* head branches
-     against the `<type>/rift-<issue>-<slug>` convention, and `gh pr list --search "<issue> in:body"`).
-     If such a PR exists and merge is enabled, hand it straight to Phase 1e (babysit) — don't
-     re-implement.
+3. **Resolve the repo's issue-branch convention — once, before anything matches against it.** Read
+   the target repo's `CLAUDE.local.md` / `CLAUDE.md` for the branch-naming rule and derive a match
+   pattern from it (rift's is `<type>/rift-<issue>-<slug>`). If the repo states no rule, fall back to
+   matching any head branch that contains the issue number as a delimited token
+   (`(^|[/-])<issue>([-_.]|$)`). This is not cosmetic: step 4 uses the pattern to detect an issue that
+   **already has a PR**, so a convention mismatch silently re-implements the issue and opens a
+   **duplicate PR**. Record the resolved pattern in the run-log header.
+
+   (`.rift-ship/` is this skill's own state directory. The name is historical and does not assert the
+   repo is rift — the directory is created in whatever repo the skill runs in.)
+4. **Prune already-in-flight / done issues:**
+   - Skip an issue that already has an open PR that closes it. Run **both** matchers — head branches
+     from *My open PRs* against the step-3 pattern, and `gh pr list --search "<issue> in:body"` — they
+     fail in different ways and a hit from either is enough. If such a PR exists and merge is enabled,
+     hand it straight to Phase 1e (babysit) — don't re-implement.
    - Skip issues labeled `blocked`, `wontfix`, `needs-design`, or `question` unless named explicitly.
    - Skip issues labeled `needs-triage` (this is the hold-for-triage label the auto-filer applies —
      agent-found findings are not implemented until a human promotes them by removing that label)
      unless the issue is named explicitly in the args.
-4. **Expand umbrella / tracking / epic issues — never implement them directly.** An umbrella issue
+5. **Expand umbrella / tracking / epic issues — never implement them directly.** An umbrella issue
    describes a *plan enacted by other issues*, not a unit of work; handing its body to `fix-issue`
    would produce a monster PR and blow the fix cap. Detect an umbrella by **any** of:
    - a label like `epic`, `umbrella`, `tracking`, or `meta`;
    - native GitHub sub-issues (`gh api repos/{owner}/{repo}/issues/{n}/sub_issues`);
    - a task-list of issue refs (`- [ ] #NNN`) in the body **or comments**;
-   - prose signals: "umbrella", "series of (small/additive) PRs", "tranche", "follow-up to #X",
-     "will link each PR here", "one per item".
+   - prose signals: "umbrella", "series of (small/additive) PRs", "tranche", "will link each PR
+     here", "one per item".
+
+   Prose signals are the weakest of the four — require a second signal, or an actual enumerable
+   child list, before treating a prose-only hit as an umbrella. Misclassifying a normal issue as an
+   umbrella drops it from the run silently (`umbrella-manual`), which is worse than attempting it.
+   In particular, **"follow-up to #X" is not an umbrella signal**: a follow-up is an ordinary
+   single unit of work that happens to reference its predecessor (use it for *ordering* in step 7,
+   not for classification).
 
    On a hit, **decompose instead of implement**:
    - Enumerate children = native sub-issues ∪ task-list `#NNN` refs. Keep only the **open** ones
@@ -170,14 +187,40 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
      consider closing"; build nothing.
    - If an umbrella has **no machine-enumerable children** (pure-prose plan) → set
      `status=umbrella-manual` and skip; it needs a human to split it into issues first.
-5. **Order** the worklist: explicit arg order if given; else ascending issue number. If an issue
-   body says "depends on #X", put #X earlier. Keep expanded-umbrella children in their tranche order.
-6. **Write the run-log** at `.rift-ship/worklist.md` (create the dir): one row per issue with
-   columns `issue | title | base | status | pr | docs | notes` (fill `docs` at 1c-docs), all
-   `status=pending`. This file is the
-   durable source of truth for resume; update it after every phase transition.
-7. **Announce the plan**: print the ordered worklist (noting any umbrella expansions) and the mode
-   (merge vs `--no-merge`). Then begin the loop.
+6. **Consult the delivery dashboard, if one is configured.** Discover it exactly as *Phase 2.5* does
+   (explicit `dashboard.path` in the repo's `CLAUDE.local.md`; else `.rift-ship/dashboard-path`; else
+   a discoverable *Delivery Dashboard* note with a `db/` issue folder). **No dashboard → skip this
+   step silently**; everything below is a no-op without one.
+
+   Phase 2.5 already *writes* this graph — `blocked_by` / `unblocks` edges and `kind: release` /
+   `kind: consume` gate nodes. Reading it back here is what makes it a dependency graph instead of a
+   write-only log:
+   - **Screen out issues blocked upstream.** An issue whose `blocked_by` names an issue that is still
+     **open**, or an unclosed release/consume gate, is not workable in this run: set
+     `status=blocked-upstream(<what>)`, record it, and leave it out of the worklist. Without this
+     screen the issue is attempted anyway, burns a full `fix-issue` cycle, and fails for a reason the
+     graph already knew — a merge is not a delivery, and an `awaiting-release` downstream cannot be
+     implemented against a version that isn't published yet.
+   - **Order by the edges.** Order the survivors so that an issue which `unblocks` others comes first.
+     Prefer these edges over the prose-scraped "depends on #X" of step 7 — the graph is the maintained
+     version of the same information; prose is the fallback for issues the graph doesn't cover.
+   - **Distrust stale edges.** An edge naming an issue that GitHub reports **closed** is stale: ignore
+     it rather than blocking on it, and note it for the Phase 2.5 refresh. The graph is an input, not
+     an authority — live GitHub state wins every disagreement.
+7. **Order** the worklist: explicit arg order if given; else the dashboard edge order from step 6;
+   else ascending issue number. If an issue body says "depends on #X" (and step 6 produced no edge
+   for it), put #X earlier. Keep expanded-umbrella children in their tranche order.
+8. **Write the run-log** at `.rift-ship/worklist.md` (create the dir): a header line recording the
+   run's mode and the step-3 branch pattern, then one row per issue with columns
+   `issue | title | base | status | pr | attempts | docs | downstream | notes`, all `status=pending`
+   and `attempts=0`. Where each column is filled: `docs` at 1c-docs, `downstream` at 1f-cross,
+   `attempts` incremented on every `fix-issue` invocation at 1c. The escalation outcome is written
+   **inside the `attempts` cell**, not in `notes`: a 1e→1c escalation reads `2 (esc:rescued)` or
+   `2 (esc:failed)` once its outcome is known. This file is the
+   durable source of truth for resume **and the only record the Phase 2 report can be built from** —
+   update it after every phase transition.
+9. **Announce the plan**: print the ordered worklist (noting any umbrella expansions and any
+   `blocked-upstream` skips) and the mode (merge vs `--no-merge`). Then begin the loop.
 
 ---
 
@@ -206,9 +249,12 @@ won't trigger a rebase cascade. So before the loop, the coordinator makes **one*
   the run-log (`pipeline: off — CI ~3m` / `pipeline: off — strict branches`).
 - **Pipelined fan-out** when CI is **long** AND up-to-date is **not** required AND required status
   checks are absent/bypassable (you're an admin). Then:
-  1. Run **1a–1d serial and inline** per issue (triage → base → implement → commit-push-pr). Opening
-     the PR starts its CI. Do **not** run 1e yet — move straight to the next issue so the CIs stack
-     up and run concurrently.
+  1. Run **1a–1d, including 1d-verify, serial and inline** per issue (triage → base → implement →
+     commit-push-pr → verify the push). Opening the PR starts its CI. Do **not** run 1e yet — move
+     straight to the next issue so the CIs stack up and run concurrently. 1d-verify stays with 1d and
+     is never deferred to the merge sweep: it needs the issue's worktree, which is still current at
+     this point, and its whole purpose is to stop a partial push before CI's green result makes it
+     look finished.
   2. After the last issue's PR is open, do a **merge sweep**: merge the PRs one at a time in worklist
      order (1e per PR). Because up-to-date isn't required, merging one does **not** invalidate the
      others — no rebase cascade. The only cross-PR conflict is a **shared file**, almost always
@@ -273,7 +319,9 @@ what picks it up, and it is also what keeps the user's working directory out of 
 > inherent to `--no-merge`, not a bug.
 
 Then invoke the **`fix-issue`** skill for N **inline** (so it runs on the Opus session model). It
-runs verifier-first in an isolated worktree with a hard cap of 3 fix cycles.
+runs verifier-first in an isolated worktree with a hard cap of 3 fix cycles. Increment the issue's
+`attempts` in the run-log as you invoke it — that counter is what the Phase 2 report and the caps
+below both read, and it is only correct if it is written here, at the invocation.
 - **Success** (verify gate green, no unresolved review blockers) → proceed to 1c-docs.
 - **Failure** (cap exhausted / Remaining Blockers Report) → set `status=blocked`, copy the blockers
   summary into the run-log notes, and `continue`. Do **not** open a PR for broken work.
@@ -301,9 +349,33 @@ explicit gate here, not an afterthought. In the worktree, before 1d:
 
 ### 1d — Commit, push, open the PR (Haiku subagent)
 Delegate **`commit-push-pr`** for N's worktree/branch to a **Haiku subagent**, targeting the base
-from 1b. It must follow `CLAUDE.local.md`: branch name `<type>/rift-<issue>-<slug>`, conventional-
-commit message (no Claude attribution in the body), PR title = issue title, body with `Closes #N` +
-milestone. Record the PR number/URL in the run-log; set `status=pr-open`.
+from 1b. It must follow `CLAUDE.local.md`: branch name matching the convention resolved in Phase 0
+step 3 (rift's is `<type>/rift-<issue>-<slug>`), conventional-commit message (no Claude attribution in
+the body), PR title = issue title, body with `Closes #N` + milestone. Record the PR number/URL in the
+run-log; set `status=pr-open`.
+
+The branch it *creates* and the pattern a resume run *matches against* must come from that one
+resolved rule. If they diverge, a resumed run fails to see the existing PR and re-implements the
+issue.
+
+**1d-verify — Confirm the PR actually contains the work that was verified.** `fix-issue` verified the
+change in the worktree on the session model; a *different*, cheaper agent then committed and pushed
+it. Nothing up to this point has checked that what landed on the remote is what was verified — and a
+**green CI on a commit that omitted half the change is a perfectly consistent outcome**, not a
+contradiction. A green check and a merge commit are both compatible with the work not being there.
+Close the gap before babysit ever sees the PR:
+
+- In the worktree: `git rev-parse HEAD` and `git diff --stat origin/<base>...HEAD`.
+- On the remote: `gh pr view <pr> --json headRefOid` and `gh pr diff <pr> --stat`.
+- The head SHAs must be equal, and the two file lists must match (per-file line counts within
+  rounding).
+
+A mismatch means the push was partial — unstaged files, a new file swallowed by `.gitignore`, a commit
+that was never made, or a push that raced the PR creation. Do **not** hand it to babysit: return to the
+worktree, commit and push what is missing, and re-check. If it still mismatches after one correction,
+set `status=blocked`, put **both file lists** in the run-log notes, and `continue`. An unexplained
+mismatch is precisely the case where proceeding yields a merged PR that does not contain the feature,
+and the merge makes it look finished.
 
 ### 1e — Babysit to merged (Haiku subagent) — default
 **In pipelined mode (1·coord), 1e is deferred:** don't babysit here — move to the next issue and run
@@ -318,11 +390,39 @@ admin-overrides a required *review* it can't self-satisfy (green CI is still req
 - Merged → `status=merged`.
 - babysit hard-stops (still red after its cap, or unmergeable) → `status=pr-red`, note why, `continue`.
 
-If a CI failure roots in an implementation defect the Haiku babysit can't diagnose, it should say so
-in its result; the orchestrator may then re-run `fix-issue` (1c) **inline on Opus** for that issue
-once more before giving up (this counts against the issue's overall attempts — see caps below).
+If a CI failure roots in an implementation defect the Haiku babysit can't fix, it must say so in its
+structured result **and include the diagnosis it did reach**: the failing check, the distinguishing
+error lines (not the whole log), the file or symbol it suspects, and what it already tried. The
+orchestrator may then re-run `fix-issue` (1c) **inline on the session model** for that issue once more
+before giving up (this counts against the issue's overall attempts — see caps below) — and when it
+does, it **passes that diagnosis into the re-run's prompt** and writes the outcome into the run-log's
+`attempts` cell as `2 (esc:rescued)` or `2 (esc:failed)`. That retry is the issue's last attempt;
+spending it re-deriving a failure Haiku already characterized wastes the single escalation the loop
+has, and a re-run that starts from zero often reproduces the same wrong hypothesis.
 
 With `--no-merge`, skip 1e and leave the green-CI PR for review; `status` stays `pr-open`.
+
+### 1e·mem — Failure memory (consult before diagnosing, record after)
+
+A CI diagnosis is expensive to produce and currently dies with the run. The next run re-derives "this
+is the known-flaky chaos-tier suite" from scratch, and — worse — a genuine regression that *resembles*
+a known flake gets waved through as one. Give the loop somewhere durable to put what it learned:
+
+- **Before** babysit diagnoses a red check, hand it the known-failure list so it can match first:
+  `graphify query "CI failure <check-name> <first error line>"` in repos that have a graph, else read
+  `.rift-ship/failures.md`. A match is a *hypothesis to confirm*, never a verdict.
+- **After** any diagnosis that reached a root cause, record one entry: the failure **signature**
+  (check name plus the distinguishing error line), the **root cause**, the **fix**, and the **PR or
+  issue** it came from. Append to `.rift-ship/failures.md`; in graphify repos also
+  `graphify save-result --question "CI: <signature>" --answer "<cause> → <fix>" --outcome useful`.
+- **Record the misses, not just the hits.** A signature that matched a past entry but turned out to
+  have a different cause is the most valuable entry in the file — write it with `--outcome corrected`
+  and state what was actually true. A memory that only hears about its successes teaches the next run
+  to be confidently wrong.
+- **Flake vs. regression is settled by evidence, not resemblance.** Before writing a failure off as a
+  known flake, confirm the failing run's head SHA is the same commit as the green run you are
+  comparing it against. Two runs minutes apart on different SHAs are not a re-run of the same test,
+  and treating them as one is how a real regression gets merged.
 
 ### 1f — Harvest & file findings (out-of-scope discoveries)
 While implementing (1c) and diagnosing CI (1e), the sub-skills routinely surface **concrete,
@@ -380,11 +480,11 @@ first non-terminal issue.
 ## Phase 2 — Final report
 
 When every issue is in a terminal status (`merged` / `pr-open` / `deferred(<model>)` /
-`needs-design` / `blocked` / `pr-red` / `umbrella-expanded` / `umbrella-done` / `umbrella-manual`),
-print a summary table:
+`needs-design` / `blocked` / `pr-red` / `blocked-upstream(<what>)` / `umbrella-expanded` /
+`umbrella-done` / `umbrella-manual`), print a summary table:
 
-| Issue | Title | Base | Status | PR | Docs | Downstream | Notes |
-|-------|-------|------|--------|----|------|------------|-------|
+| Issue | Title | Base | Status | PR | Attempts | Docs | Downstream | Notes |
+|-------|-------|------|--------|----|----------|------|------------|-------|
 
 The **Docs** column records the doc outcome from 1c-docs for each implemented issue — the files
 touched, or `n/a — <why>` when genuinely exempt. It makes the "docs are part of done" gate auditable
@@ -403,6 +503,9 @@ Then, grouped for action:
   (dischargeable — suggest closing), `umbrella-manual` (needs a human to split into issues).
 - **needs-design**: issues triage flagged as underspecified — need human input before implementing.
 - **blocked / pr-red**: the one-line blocker per issue and the suggested next step.
+- **blocked-upstream**: issues the dependency graph screened out (step 6), each with the open issue or
+  unclosed release/consume gate it waits on. These are **not failures** — they are correct skips, and
+  they become workable as soon as the named gate closes.
 - **Findings filed** (`agent-found` + `needs-triage`): the new issue numbers filed during the run,
   noting they are held for your triage — promote (remove `needs-triage`) to make them eligible for a
   future `--all` run.
@@ -413,6 +516,15 @@ Then, grouped for action:
 State counts plainly (e.g. "7 issues: 4 merged, 2 deferred (Fable), 1 needs-design; 3 findings
 filed (#331-#333, held for triage)"). Never report an issue as merged that `babysit-prs` didn't
 actually merge; never report `pr-open` as done.
+
+**Persist the report.** Write the same table and groupings to
+`.rift-ship/reports/<YYYY-MM-DD>-<mode>.md` in addition to printing them. A report that exists only in
+the conversation is gone the moment the session is — which is both a problem for the human reading the
+results of an unattended overnight run, and the reason questions like *does the 1e→1c retry ever
+actually rescue an issue?* or *which caps bind in practice?* cannot be answered today. Along with the
+table, carry over each issue's `attempts` cell verbatim (including any `(esc:rescued)` /
+`(esc:failed)` annotation) plus any failure signature written in 1e·mem. Cheap to write, and the only
+evidence base for tuning the caps later — change them from measurements, not impressions.
 
 ---
 
@@ -484,9 +596,18 @@ loop is built to make that a **pause, not a loss**:
 - Per-issue implementation and CI fixing inherit the sub-skills' **3-cycle caps**. The orchestrator
   allows at most **one** extra `fix-issue` re-run per issue when babysit traces a red CI to an
   implementation defect (1e → 1c). Beyond that, the issue is `pr-red`/`blocked` and skipped.
-- **Consecutive-failure circuit breaker:** if **3 issues in a row** end `blocked`/`pr-red`, stop the
-  loop and report — this signals a systemic problem (broken base branch, CI outage, bad environment)
-  that per-issue retries won't fix. List the remaining `pending` issues.
+- **Circuit breakers — two of them, because one shape of systemic failure hides from the other:**
+  - *Consecutive:* **3 issues in a row** end `blocked`/`pr-red` → stop. Catches a hard systemic
+    problem (broken base branch, CI outage, bad environment) that per-issue retries won't fix.
+  - *Rate:* once **at least 4 issues** have been attempted, stop if **more than half** of them ended
+    `blocked`/`pr-red`. Catches the intermittent version of the same thing — a flaky required check
+    that kills every *other* issue never trips a consecutive counter, but a run losing most of its
+    worklist is not one to leave running unattended.
+  - `deferred(<model>)`, `needs-design`, `blocked-upstream(...)` and the umbrella statuses are **not**
+    failures and count toward neither breaker — they are correct skips, and a run made mostly of them
+    is working as designed.
+  - On either trip: report which breaker fired and why, list the remaining `pending` issues, and stop.
+    Do not reset a breaker by retrying — that is the failure mode the breaker exists to prevent.
 - Never force-push, never touch a branch that isn't an issue's own head, never merge a PR that isn't
   green and mergeable.
 - Never move or dirty the user's checkout: no `git switch`/`checkout`/`reset`/`merge` outside a
