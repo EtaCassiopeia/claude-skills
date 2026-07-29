@@ -265,6 +265,9 @@ won't trigger a rebase cascade. So before the loop, the coordinator makes **one*
      full CI re-run (the code was already green pre-rebase).
   3. Keep the merge sweep **serial** — never fan out concurrent background merges that rebase onto a
      moving base (they race). Record `pipeline: on — CI ~15m, fan-out N PRs, merge sweep`.
+  4. Re-sync the knowledge graph **after each merge in the sweep** (1g), not once at the end. The
+     later PRs in the sweep are the ones most likely to be queried against a graph that predates the
+     earlier merges.
 
 Never pipeline the *implementation* (fix-issue is inline/serial by construction), and never merge a
 red or unmergeable PR. When in doubt, stay strictly serial — it is always correct, just slower.
@@ -470,10 +473,38 @@ implement it in this run — different repo, different gate, different review.
 Record one line per consumer in the run-log (`downstream: rift-java #12 (adoption), rift-go none`),
 and surface it in the Phase 2 report.
 
-### 1g — Checkpoint
+### 1g — Checkpoint, and re-sync the knowledge graph if anything merged
+
 Update `.rift-ship/worklist.md`. This run-log + live GitHub state is enough to resume after
 compaction: a re-invoke re-reads it, re-prunes against open PRs/merged issues, and picks up the
 first non-terminal issue.
+
+**Then, if this issue's PR merged, re-sync the repo's knowledge graph.** A PR merges on GitHub, so
+nothing happens locally: the main checkout's HEAD never moves and no git hook ever fires. This is
+the one point in the loop hooks genuinely cannot cover, so it is an explicit step — skip it and
+every later issue in the batch (and every later session) queries a graph that predates the merge,
+which is exactly when a stale answer is most likely to be believed.
+
+In a repo with a `graphify-out/` directory:
+
+```sh
+~/.claude/graphify/bin/graph-sync.sh            # fetch + graphify update + label --missing-only
+```
+
+Two things to know about it:
+
+- **It only fetches; it never moves the user's HEAD.** So if the main checkout is behind
+  `origin/<base>` — which it will be, since the loop never advances it — `graphify update` re-extracts
+  from a working tree that predates the merge and the sync achieves nothing. Check first
+  (`git -C <main> rev-list --count HEAD..origin/<base>`). When the checkout is **clean, on the base
+  branch, and 0 commits ahead**, a `git merge --ff-only origin/<base>` is safe and is what makes the
+  sync meaningful — it is a fast-forward to work the user just merged, not a rewrite. If the tree is
+  **dirty**, or the branch is **ahead**, or it is **not on the base branch**, do NOT touch it: run
+  the sync anyway, and say in the run-log that the graph is only as fresh as the checkout.
+- Run it **once per merge**, not once per run. In pipelined mode that means inside the merge sweep,
+  after each PR merges — not only after the last one.
+
+No `graphify-out/` → skip silently; this is a no-op in repos without a graph.
 
 ---
 
@@ -493,6 +524,12 @@ at a glance; a merged issue with a blank Docs cell is a smell to flag, not to hi
 The **Downstream** column does the same for 1f-cross: the consumer issues filed (`rift-java #12`),
 `none — no consumed surface touched`, or `n/a` in a repo that declares no consumers. Same reasoning:
 a merged issue that changed a consumed schema and shows a blank cell is a smell.
+
+State the **graph sync** outcome in one line too (1g): whether the knowledge graph was re-synced
+after the merges and what it rebuilt to (`graph: synced — 2915 nodes / 119 communities @ <sha>`), or
+why it was not (`graph: stale — main checkout dirty, not fast-forwarded`; `graph: n/a — no
+graphify-out/`). A run that merged work and left the graph pointing at the pre-merge tree should say
+so, because the next session's first query will silently answer from it.
 
 Then, grouped for action:
 - **Merged**: PR links.
