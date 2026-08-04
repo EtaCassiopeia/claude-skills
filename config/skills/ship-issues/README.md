@@ -226,8 +226,11 @@ The orchestrator captures each via the reusable **`file-finding`** skill (run on
 The loop is built so a dead session is a **pause, not a loss**:
 
 - **Nothing merged or pushed is lost.** Merged PRs stay merged, open PRs stay open. Progress is
-  re-derived from **live GitHub state** (open PRs, merged/closed issues) plus the run-log
-  `.rift-ship/worklist.md`, checkpointed after every phase — not from conversation memory.
+  re-derived from **live GitHub state** (open PRs, merged/closed issues) plus your run's run-log,
+  checkpointed after every phase — not from conversation memory.
+- **Find the right run-log.** With more than one run live, `.rift-ship/worklist.md` may belong to a
+  different run. `.rift-ship/ACTIVE-RUNS.md` maps run → batch → log file; resume the row whose batch
+  matches your arguments.
 - **To resume:** re-invoke the *same* command in a fresh session once tokens recharge. Phase 0
   re-prunes against GitHub, skips anything already PR'd or merged, and continues from the first
   non-terminal issue. Re-running is idempotent — never re-implements a PR'd issue, never re-merges.
@@ -291,4 +294,5 @@ display is off."**
 ## Terminal statuses (in the final report)
 
 `merged` · `pr-open` · `deferred(<model>)` · `umbrella-expanded` · `umbrella-done` ·
-`umbrella-manual` · `needs-design` · `blocked` · `pr-red`
+`umbrella-manual` · `needs-design` · `blocked` · `pr-red` · `blocked-upstream(<what>)` ·
+`owned-by-run<N>`

@@ -128,6 +128,34 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
 
 ## Phase 0 — Parse args & resolve the worklist
 
+### 0·claim — Claim a run slot before touching any shared state
+
+More than one `/ship-issues` session can be live in the same repo at once, and other sessions may be
+creating or deleting worktrees for unrelated reasons. Every run therefore claims a slot **before** it
+writes a run-log, creates a worktree, or prunes the candidate set.
+
+1. **Read `.rift-ship/ACTIVE-RUNS.md`** if it exists — the coordination record, one row per run:
+
+   | run | batch | run-log file | status | owns these branches |
+
+2. **Pick your run id**: highest id present + 1 (the first run in a repo is `1`).
+3. **Claim a run-log file.** `worklist.md` belongs to whichever run already claims it. Take it only if
+   it is unclaimed and no other run is `LIVE`; otherwise take `.rift-ship/worklist-run<N>.md`.
+   **Never write, archive, rename or overwrite another run's log** — it is that run's only resume
+   record, and archiving a live one mid-flight is the failure this whole step exists to prevent.
+4. **Register your row** (`status=LIVE`, your batch, your log file, the branch patterns you will own).
+   Create ACTIVE-RUNS.md with the header and these rules if it is absent.
+5. **Edit only your own row.** ACTIVE-RUNS.md is shared mutable state: update your row in place, never
+   rewrite the file wholesale, never restate another run's status. If you must record a cross-batch
+   interaction that another run should know about, add it as a note section below the table and say
+   which run wrote it.
+6. **Release the slot in Phase 2** — set your row to `status=DONE (<YYYY-MM-DD>)`. A file full of stale
+   `LIVE` rows is worse than no file: the next run learns to ignore it.
+
+This costs about two file operations in the single-run case, which is the common one. Do it anyway —
+the cost of discovering a second run *after* both have claimed `worklist.md` is a destroyed run-log
+and two sessions implementing the same issue.
+
 1. **Flags** (parse from `$ARGUMENTS`):
    - `--all` — every open issue (the default when no issue numbers are given).
    - `--label <name>` — restrict to open issues carrying that label.
@@ -155,6 +183,14 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
      from *My open PRs* against the step-3 pattern, and `gh pr list --search "<issue> in:body"` — they
      fail in different ways and a hit from either is enough. If such a PR exists and merge is enabled,
      hand it straight to Phase 1e (babysit) — don't re-implement.
+   - **Skip an issue owned by another `LIVE` run** (from `0·claim`). Set `status=owned-by-run<N>` and
+     leave it out of the worklist. This is the one case the two matchers above **cannot** catch: an
+     issue being implemented in another run's worktree has no PR and no pushed branch yet, so live
+     GitHub state reports it as untouched. That invisibility is exactly how two runs end up building
+     the same issue twice. Corroborate with `git ls-remote --heads origin` against the step-3 pattern —
+     a remote branch for the issue with no PR is an in-flight claim. But a matching remote branch that
+     **no `LIVE` run owns** is a stale leftover from an abandoned run, not a claim: note it in the
+     run-log and proceed normally.
    - Skip issues labeled `blocked`, `wontfix`, `needs-design`, or `question` unless named explicitly.
    - Skip issues labeled `needs-triage` (this is the hold-for-triage label the auto-filer applies —
      agent-found findings are not implemented until a human promotes them by removing that label)
@@ -210,8 +246,9 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
 7. **Order** the worklist: explicit arg order if given; else the dashboard edge order from step 6;
    else ascending issue number. If an issue body says "depends on #X" (and step 6 produced no edge
    for it), put #X earlier. Keep expanded-umbrella children in their tranche order.
-8. **Write the run-log** at `.rift-ship/worklist.md` (create the dir): a header line recording the
-   run's mode and the step-3 branch pattern, then one row per issue with columns
+8. **Write the run-log** at the path you claimed in `0·claim` — `.rift-ship/worklist.md` when you own
+   it, else `.rift-ship/worklist-run<N>.md` (create the dir): a header line recording the run's id,
+   mode and the step-3 branch pattern, then one row per issue with columns
    `issue | title | base | status | pr | attempts | docs | downstream | notes`, all `status=pending`
    and `attempts=0`. Where each column is filled: `docs` at 1c-docs, `downstream` at 1f-cross,
    `attempts` incremented on every `fix-issue` invocation at 1c. The escalation outcome is written
@@ -228,6 +265,16 @@ bills at Haiku. Have the subagent return a compact structured result, not a tran
 
 For each issue **N** with a non-terminal status, run steps a–g. On any hard failure, set the
 issue's status, write the run-log, and `continue` to the next issue — never abort the whole loop.
+
+**Re-read the run-log at every issue boundary — do not carry the plan in conversation memory.** A
+long batch will cross one or more context compactions, and a compaction summarises the transcript:
+the ordering, the `attempts` counters, and which issues are already terminal are exactly the details
+a summary flattens. Re-reading is a few hundred tokens and makes the loop's behaviour identical
+either side of a compaction, which is the property the run-log exists to provide. Concretely, at the
+top of each iteration: re-read your run-log, take the first non-terminal row as N, and trust that file
+over anything you remember. If the log and your recollection disagree, **the log is right** — and if
+the log disagrees with live GitHub (a PR you don't remember opening), GitHub is right and the log
+needs correcting. This is also what keeps a batch's later issues as carefully done as its first.
 
 ### 1·coord — Coordinator: pipeline the CI waits (repo-aware, decide ONCE up front)
 
@@ -475,7 +522,7 @@ and surface it in the Phase 2 report.
 
 ### 1g — Checkpoint, and re-sync the knowledge graph if anything merged
 
-Update `.rift-ship/worklist.md`. This run-log + live GitHub state is enough to resume after
+Update **your run's** run-log (`0·claim`). This run-log + live GitHub state is enough to resume after
 compaction: a re-invoke re-reads it, re-prunes against open PRs/merged issues, and picks up the
 first non-terminal issue.
 
@@ -511,8 +558,8 @@ No `graphify-out/` → skip silently; this is a no-op in repos without a graph.
 ## Phase 2 — Final report
 
 When every issue is in a terminal status (`merged` / `pr-open` / `deferred(<model>)` /
-`needs-design` / `blocked` / `pr-red` / `blocked-upstream(<what>)` / `umbrella-expanded` /
-`umbrella-done` / `umbrella-manual`), print a summary table:
+`needs-design` / `blocked` / `pr-red` / `blocked-upstream(<what>)` / `owned-by-run<N>` /
+`umbrella-expanded` / `umbrella-done` / `umbrella-manual`), print a summary table:
 
 | Issue | Title | Base | Status | PR | Attempts | Docs | Downstream | Notes |
 |-------|-------|------|--------|----|----------|------|------------|-------|
@@ -555,7 +602,10 @@ filed (#331-#333, held for triage)"). Never report an issue as merged that `baby
 actually merge; never report `pr-open` as done.
 
 **Persist the report.** Write the same table and groupings to
-`.rift-ship/reports/<YYYY-MM-DD>-<mode>.md` in addition to printing them. A report that exists only in
+`.rift-ship/reports/<YYYY-MM-DD>-<mode>.md` in addition to printing them — suffixed `-run<N>` whenever
+another run has ever claimed a slot in this repo, because `<date>-<mode>` collides the moment two runs
+share a day and a mode, and the loser is silently overwritten. **Then release your run slot**: set your
+row in `.rift-ship/ACTIVE-RUNS.md` to `status=DONE (<YYYY-MM-DD>)`. A report that exists only in
 the conversation is gone the moment the session is — which is both a problem for the human reading the
 results of an unattended overnight run, and the reason questions like *does the 1e→1c retry ever
 actually rescue an issue?* or *which caps bind in practice?* cannot be answered today. Along with the
@@ -613,8 +663,13 @@ A session can die mid-run — token/rate-limit exhaustion, a crash, or you simpl
 loop is built to make that a **pause, not a loss**:
 
 - **Nothing merged or pushed is lost.** Merged PRs stay merged, open PRs stay open. Progress is
-  re-derived from **live GitHub state** (open PRs, merged/closed issues) plus the run-log
-  `.rift-ship/worklist.md`, which is checkpointed after every phase — not from conversation memory.
+  re-derived from **live GitHub state** (open PRs, merged/closed issues) plus your run's run-log,
+  which is checkpointed after every phase — not from conversation memory.
+- **Find the right run-log first.** A fresh session defaults to `.rift-ship/worklist.md`, which may
+  belong to a *different* run. Read `.rift-ship/ACTIVE-RUNS.md` (`0·claim`) and resume the row whose
+  batch matches your arguments; adopt that run's id and log file rather than opening a new slot.
+  Correctness does not hinge on this — Phase 0 re-derives from live GitHub and skips anything already
+  PR'd — but reading the wrong log produces a wrong plan and a wrong report.
 - **To resume:** re-invoke the *same* command (e.g. `/ship-issues --all`) in a fresh session once
   your tokens recharge. Phase 0 re-prunes against GitHub, re-reads the run-log, skips anything that
   already has a PR or is merged, and continues from the first non-terminal issue. Re-running is
@@ -640,13 +695,17 @@ loop is built to make that a **pause, not a loss**:
     `blocked`/`pr-red`. Catches the intermittent version of the same thing — a flaky required check
     that kills every *other* issue never trips a consecutive counter, but a run losing most of its
     worklist is not one to leave running unattended.
-  - `deferred(<model>)`, `needs-design`, `blocked-upstream(...)` and the umbrella statuses are **not**
-    failures and count toward neither breaker — they are correct skips, and a run made mostly of them
+  - `deferred(<model>)`, `needs-design`, `blocked-upstream(...)`, `owned-by-run<N>` and the umbrella
+    statuses are **not** failures and count toward neither breaker — they are correct skips, and a run made mostly of them
     is working as designed.
   - On either trip: report which breaker fired and why, list the remaining `pending` issues, and stop.
     Do not reset a breaker by retrying — that is the failure mode the breaker exists to prevent.
 - Never force-push, never touch a branch that isn't an issue's own head, never merge a PR that isn't
   green and mergeable.
+- **Never touch another run's things** (`0·claim`): do not write, archive or rename another run's
+  run-log; do not merge a PR, push a branch, or `git worktree remove` a directory your run did not
+  create. Worktree cleanup is especially easy to get wrong from outside a run — a directory whose
+  issue is closed can still be a live run's working tree.
 - Never move or dirty the user's checkout: no `git switch`/`checkout`/`reset`/`merge` outside a
   per-issue worktree, and no implementing an issue in the main working directory when its worktree
   cannot be created — stop and report instead.
