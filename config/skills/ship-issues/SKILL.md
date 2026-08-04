@@ -60,6 +60,10 @@ rules, isolate failures so one bad issue never blocks the rest, and produce an a
 - **Failure is isolated, never fatal to the batch.** If an issue's `fix-issue` exhausts its 3-cycle
   cap, or its PR can't be driven green by `babysit-prs`, record the blocker and **move to the next
   issue**. Never merge red work; never abandon the remaining worklist because one issue failed.
+- **Stack only real dependencies.** GitHub stacked PRs (*Phase 0 step 8*) are used **only** for issues
+  that already depend on each other — dashboard `blocked_by`/`unblocks` edges, umbrella tranches,
+  "depends on #X". Never stack unrelated issues: every layer above a blocked one becomes unmergeable,
+  which trades the isolation principle above for a batch-wide blocker you manufactured yourself.
 - **The base branch is chosen, never defaulted.** Follow the repo's milestone → base-branch map
   (*Phase 1b*). Defaulting every PR to `master` is a bug.
 - **Authorization.** Invoking this skill **is** authorization to push, open PRs, **and merge** the
@@ -247,9 +251,33 @@ and two sessions implementing the same issue.
 7. **Order** the worklist: explicit arg order if given; else the dashboard edge order from step 6;
    else ascending issue number. If an issue body says "depends on #X" (and step 6 produced no edge
    for it), put #X earlier. Keep expanded-umbrella children in their tranche order.
-8. **Write the run-log** at the path you claimed in `0·claim` — `.rift-ship/worklist.md` when you own
+8. **Identify stackable groups (GitHub stacked PRs) — only where a dependency already exists.**
+   A *stackable group* is an ordered run of **≥2** worklist issues where each depends on the one
+   before it: consecutive children of an expanded umbrella sharing a tranche order (step 5), issues
+   joined by dashboard `blocked_by`/`unblocks` edges (step 6), or a prose "depends on #X" (step 7).
+   Everything else stays an ordinary independent PR cut from `origin/<base>`. **Do not stack
+   unrelated issues** — see the guiding principle; a stack is a dependency you are asserting, and
+   asserting a false one costs you the batch's failure isolation.
+
+   **Probe the capability once, before planning any stack:**
+
+   ```sh
+   gh extension install github/gh-stack   # once per machine; no-op if already installed
+   gh stack view --json                   # exit 9 = stacked PRs not enabled for this repository
+   ```
+
+   Exit `9`, an extension you cannot install, or any doubt → **no stacks this run**: every issue takes
+   the ordinary path and nothing below changes. Record `stacks: off — <why>` in the run-log header.
+   Stacked PRs are in public preview, so absence is a normal outcome, not a degraded one — never
+   block a run on it.
+
+   For each group you do form, assign a stack id (`S1`, `S2`, …) and number the layers **bottom-up**,
+   and record `stack:S1 layer 2/3` in each member's run-log notes. The bottom layer behaves exactly
+   like an unstacked issue; the layers above it differ in base (1b), worktree origin (1c), link (1d),
+   verification (1d-verify) and merge order (1e), and nowhere else.
+9. **Write the run-log** at the path you claimed in `0·claim` — `.rift-ship/worklist.md` when you own
    it, else `.rift-ship/worklist-run<N>.md` (create the dir): a header line recording the run's id,
-   mode and the step-3 branch pattern, then one row per issue with columns
+   mode, the step-3 branch pattern and the step-8 `stacks:` outcome, then one row per issue with columns
    `issue | title | base | status | pr | attempts | docs | downstream | notes`, all `status=pending`
    and `attempts=0`. Where each column is filled: `docs` at 1c-docs, `downstream` at 1f-cross,
    `attempts` incremented on every `fix-issue` invocation at 1c. The escalation outcome is written
@@ -257,8 +285,9 @@ and two sessions implementing the same issue.
    `2 (esc:failed)` once its outcome is known. This file is the
    durable source of truth for resume **and the only record the Phase 2 report can be built from** —
    update it after every phase transition.
-9. **Announce the plan**: print the ordered worklist (noting any umbrella expansions and any
-   `blocked-upstream` skips) and the mode (merge vs `--no-merge`). Then begin the loop.
+10. **Announce the plan**: print the ordered worklist (noting any umbrella expansions, any
+    `blocked-upstream` skips, and any stackable groups with their layer order) and the mode (merge vs
+    `--no-merge`). Then begin the loop.
 
 ---
 
@@ -310,12 +339,26 @@ won't trigger a rebase cascade. So before the loop, the coordinator makes **one*
      (place each issue's entry under a distinct changelog subsection — `Fixed`/`Security`/`Changed` —
      so git 3-way usually auto-merges them and no rebase is even needed). Since CI isn't merge-
      required here, a CHANGELOG-only rebase can merge as soon as it's mergeable without re-waiting a
-     full CI re-run (the code was already green pre-rebase).
+     full CI re-run (the code was already green pre-rebase). **Within a stacked group this conflict
+     cannot arise** — layer *k+1* already contains layer *k*'s changelog entry, because it is based on
+     it. The resolution above applies only between independent fanned-out PRs.
   3. Keep the merge sweep **serial** — never fan out concurrent background merges that rebase onto a
      moving base (they race). Record `pipeline: on — CI ~15m, fan-out N PRs, merge sweep`.
   4. Re-sync the knowledge graph **after each merge in the sweep** (1g), not once at the end. The
      later PRs in the sweep are the ones most likely to be queried against a graph that predates the
      earlier merges.
+
+- **Stacked (per group; orthogonal to the two modes above).** For each stackable group from *Phase 0
+  step 8*, run 1a–1d per layer back-to-back — serial and inline, as always — and merge the layers
+  bottom-up in one sweep (1e). This is what makes fan-out available in the **strict-branch** case the
+  first bullet otherwise excludes: a layer is up-to-date with respect to *its own* base by
+  construction, so merging the layer beneath it does not invalidate it, and GitHub rebases and
+  retargets the layers above automatically instead of you fighting a cascade. Record e.g.
+  `pipeline: off — strict branches; stacks: S1 (3 layers) fanned out`.
+
+  What this does **not** change: implementation stays serial, and each layer's PR is still babysat to
+  green individually before the layer above it merges. Stacking removes the *rebase cascade*, not the
+  per-PR green gate.
 
 Never pipeline the *implementation* (fix-issue is inline/serial by construction), and never merge a
 red or unmergeable PR. When in doubt, stay strictly serial — it is always correct, just slower.
@@ -341,7 +384,14 @@ in any repo, so don't hardcode rift's rules):
 - Epic-branch targets (when the rule requires one): if the epic branch doesn't exist yet it must be
   created off the default branch and pushed first. If that setup can't be done safely unattended,
   record it as a blocker and `continue` rather than opening a PR against the wrong base.
-- Record the chosen base in the run-log.
+- **A stacked layer bases on the layer below it, not on `<base>`** (*Phase 0 step 8*). Layer *k+1*'s
+  PR targets layer *k*'s head branch; only the bottom layer targets the group's real base branch. An
+  umbrella whose children form a stack often needs **no epic branch at all** — the stack is what the
+  epic branch was hand-rolling, minus the create-and-push setup and minus the unreviewable
+  epic→default mega-PR at the end.
+- Record the chosen base in the run-log's `base` cell — for a layer, the **predecessor's branch name**
+  (`fix/rift-331-…`), not `master`. That cell is what tells a resumed run this PR is a layer rather
+  than a stray mis-targeted PR.
 
 ### 1c — Sync the base, then implement (Opus, inline)
 
@@ -362,12 +412,21 @@ what picks it up, and it is also what keeps the user's working directory out of 
   never from the local base), it silently changes the branch under the user's editor, and it fails
   outright the moment their tree is dirty. A stale local base is harmless because nothing ever
   reads it.
+- **For a stacked layer, cut from the predecessor's branch instead of the base:**
+  `git worktree add <path> -b <branch> origin/<layer-k-branch>` (after the same `git fetch origin`).
+  The predecessor's branch is already pushed by the time you get here — 1d runs for layer *k* before
+  layer *k+1* starts — so the remote ref exists. Everything else about 1c is unchanged, including
+  that each layer still gets its **own** worktree and that the user's checkout is never touched.
 - The **only** writable working directories this loop has are the per-issue worktrees under
   `.claude/worktrees/`. If a step seems to require editing the user's checkout, that step is wrong.
 
 > Freshness holds only when PRs actually merge before the next issue — i.e. the default merge mode.
 > Under `--no-merge`, earlier PRs stay open, so a later issue's base won't include them; that's
 > inherent to `--no-merge`, not a bug.
+>
+> A stacked layer is the deliberate exception: it inherits its predecessor's work through its **base
+> branch** rather than through a merge, which is the entire point of the stack — and is why a stacked
+> group is the one shape that stays coherent under `--no-merge`.
 
 Then invoke the **`fix-issue`** skill for N **inline** (so it runs on the Opus session model). It
 runs verifier-first in an isolated worktree with a hard cap of 3 fix cycles. Increment the issue's
@@ -409,6 +468,24 @@ The branch it *creates* and the pattern a resume run *matches against* must come
 resolved rule. If they diverge, a resumed run fails to see the existing PR and re-implements the
 issue.
 
+**1d-link — Register the stack on GitHub (topmost layer of a stackable group only).** Once the
+group's top PR is open, link the whole chain in a single call, bottom-to-top:
+
+```sh
+gh stack link --base <base> <pr-bottom> <pr-next> … <pr-top>
+```
+
+`gh stack link` registers the stack **without local tracking**, which is the only variant compatible
+with this loop: each layer lives in its own worktree, whereas `gh stack add` / `gh stack submit`
+assume one tracked checkout they would fight for. **Do not use those commands here**, and do not
+introduce a shared stack worktree — the per-issue worktree is what gives `fix-issue` its isolation.
+
+If the link fails (exit `4` API failure, or `9` if the step-8 probe went stale), the PRs are still
+valid chained PRs and the run continues unchanged: record `stack:S1 link failed — exit <code>` in the
+run-log and move on. The merge order in 1e does not depend on the link — only the stack map in the UI
+and `gh stack` conveniences do. Retargeting on merge is a property of the chained bases, not of the
+registration.
+
 **1d-verify — Confirm the PR actually contains the work that was verified.** `fix-issue` verified the
 change in the worktree on the session model; a *different*, cheaper agent then committed and pushed
 it. Nothing up to this point has checked that what landed on the remote is what was verified — and a
@@ -420,6 +497,15 @@ Close the gap before babysit ever sees the PR:
 - On the remote: `gh pr view <pr> --json headRefOid` and `gh pr diff <pr> --stat`.
 - The head SHAs must be equal, and the two file lists must match (per-file line counts within
   rounding).
+
+**Stacked-layer carve-out.** Run this check where it already sits — **immediately after the push, and
+before any layer beneath it merges** — and it works unchanged, because nothing has rewritten the PR
+yet. What you must **not** do is re-run the SHA-equality half of it on a stacked layer *later* in the
+run: once the layer below merges, GitHub rebases and retargets this PR, so its remote head
+legitimately differs from the local worktree HEAD with no push involved. A later re-check compares the
+**diff** (`gh pr diff <pr> --stat`, against the new base) and never the SHA. Reading a post-retarget
+SHA change as a partial push is the exact mirror of the error this step exists to prevent — and it
+would block a PR that is fine.
 
 A mismatch means the push was partial — unstaged files, a new file swallowed by `.gitignore`, a commit
 that was never made, or a push that raced the PR creation. Do **not** hand it to babysit: return to the
@@ -453,6 +539,23 @@ has, and a re-run that starts from zero often reproduces the same wrong hypothes
 
 With `--no-merge`, skip 1e and leave the green-CI PR for review; `status` stays `pr-open`.
 
+**Stacked groups merge bottom-up, one layer at a time.** Babysit layer 1 to merged, then layer 2, and
+so on; each layer gets its own green-CI gate exactly as an unstacked PR does. Expect every surviving
+layer's CI to **re-run after the layer below it merges** — GitHub rebases and retargets it, so that is
+a genuinely new commit under test, not a flake, and the layer is not mergeable until the new run is
+green. Budget for it: an *n*-layer stack costs *n* CI rounds on its top layer in the worst case.
+
+**Do not use `gh stack merge` to land a group in one shot.** It merges a PR plus every unmerged layer
+beneath it, which skips the per-PR green gate this loop is built on ("never merge red work"). It is a
+fine convenience for a human eyeballing a finished stack; it is not the unattended path.
+
+**A blocked layer blocks everything above it.** If layer *k* ends `blocked`/`pr-red`, set every layer
+above it to `blocked-upstream(stack:S<id> layer <k>)` and leave their PRs open — they are correct
+skips, not failures, and like every `blocked-upstream` they count toward neither circuit breaker.
+Layer *k* itself still counts as the failure it is. Do **not** retarget the orphaned layers onto the
+real base to rescue them: their diffs assume the layer below, so a retarget produces either a conflict
+or, worse, a clean merge of an incoherent change.
+
 ### 1e·mem — Failure memory (consult before diagnosing, record after)
 
 A CI diagnosis is expensive to produce and currently dies with the run. The next run re-derives "this
@@ -473,7 +576,10 @@ a known flake gets waved through as one. Give the loop somewhere durable to put 
 - **Flake vs. regression is settled by evidence, not resemblance.** Before writing a failure off as a
   known flake, confirm the failing run's head SHA is the same commit as the green run you are
   comparing it against. Two runs minutes apart on different SHAs are not a re-run of the same test,
-  and treating them as one is how a real regression gets merged.
+  and treating them as one is how a real regression gets merged. **On a stacked layer there is a third
+  reading**: the head SHA can change without a push and without a flake, because a lower layer merged
+  and GitHub rebased this one. Check for that retarget before concluding either "flake" or
+  "regression" — the correct verdict there is "different commit, genuinely re-tested".
 
 ### 1f — Harvest & file findings (out-of-scope discoveries)
 While implementing (1c) and diagnosing CI (1e), the sub-skills routinely surface **concrete,
@@ -573,6 +679,12 @@ The **Downstream** column does the same for 1f-cross: the consumer issues filed 
 `none — no consumed surface touched`, or `n/a` in a repo that declares no consumers. Same reasoning:
 a merged issue that changed a consumed schema and shows a blank cell is a smell.
 
+State the **stacks** outcome in one line (*Phase 0 step 8* / 1d-link): the groups formed, their layer
+order, whether `gh stack link` succeeded, and how many layers merged — `stacks: S1 = #331→#332→#333,
+linked, 3/3 merged` — or why none were formed (`stacks: off — gh-stack not enabled (exit 9)`;
+`stacks: none — no dependent groups in worklist`). Without this line, a run whose stacks all merged
+and a run that silently formed none read identically.
+
 State the **graph sync** outcome in one line too (1g): whether the knowledge graph was re-synced
 after the merges and what it rebuilt to (`graph: synced — 2915 nodes / 119 communities @ <sha>`), or
 why it was not (`graph: stale — main checkout dirty, not fast-forwarded`; `graph: n/a — no
@@ -589,8 +701,9 @@ Then, grouped for action:
 - **needs-design**: issues triage flagged as underspecified — need human input before implementing.
 - **blocked / pr-red**: the one-line blocker per issue and the suggested next step.
 - **blocked-upstream**: issues the dependency graph screened out (step 6), each with the open issue or
-  unclosed release/consume gate it waits on. These are **not failures** — they are correct skips, and
-  they become workable as soon as the named gate closes.
+  unclosed release/consume gate it waits on — plus any stacked layers orphaned by a blocked layer
+  beneath them (1e), named with their stack and blocking layer. These are **not failures** — they are
+  correct skips, and they become workable as soon as the named gate closes or the layer below merges.
 - **Findings filed** (`agent-found` + `needs-triage`): the new issue numbers filed during the run,
   noting they are held for your triage — promote (remove `needs-triage`) to make them eligible for a
   future `--all` run.
@@ -678,6 +791,12 @@ loop is built to make that a **pause, not a loss**:
 - **The only rework** is an issue whose `fix-issue` was interrupted *before* its PR was opened:
   it has no PR yet, so resume re-runs it from scratch. `fix-issue`'s own worktree and run-log
   persist on disk, so this is redo, never corruption.
+- **A half-built stack resumes cleanly.** Phase 0 step 8 re-forms the groups from the same dependency
+  edges each run, and step 4 prunes the layers that already have PRs, so a resume picks up at the
+  first layer without one. Take that layer's base from the run-log `base` cell (the predecessor's
+  branch), not from the group's real base — that cell exists for this. If the predecessor has since
+  **merged**, GitHub already retargeted it, so cut the resumed layer from `origin/<base>` normally and
+  note the stack as truncated.
 - **To minimise blast radius** when token-outs are likely: run smaller explicit batches
   (`/ship-issues 316 317 318`) rather than `--all`, so an interruption lands on a clean boundary.
 - **Unattended auto-resume:** because resume is idempotent, a scheduled routine that re-invokes
@@ -702,7 +821,10 @@ loop is built to make that a **pause, not a loss**:
   - On either trip: report which breaker fired and why, list the remaining `pending` issues, and stop.
     Do not reset a breaker by retrying — that is the failure mode the breaker exists to prevent.
 - Never force-push, never touch a branch that isn't an issue's own head, never merge a PR that isn't
-  green and mergeable.
+  green and mergeable. In particular the stacking support is limited to `gh stack link` (registration
+  only) and `gh stack view` (the probe): `gh stack push`/`submit`/`sync`/`rebase` force-with-lease
+  across branches this loop does not own, and `gh stack merge` lands layers without their own green
+  gate. None of them are the unattended path.
 - **Never touch another run's things** (`0·claim`): do not write, archive or rename another run's
   run-log; do not merge a PR, push a branch, or `git worktree remove` a directory your run did not
   create. Worktree cleanup is especially easy to get wrong from outside a run — a directory whose
