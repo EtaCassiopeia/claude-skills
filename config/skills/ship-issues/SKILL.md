@@ -12,6 +12,7 @@ allowed-tools:
   - Bash(git branch:*)
   - Bash(git status:*)
   - Bash(git worktree list:*)
+  - Bash(git ls-remote:*)
 ---
 
 ## Live Context (loaded at invocation)
