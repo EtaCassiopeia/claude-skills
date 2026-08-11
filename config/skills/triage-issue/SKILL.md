@@ -105,6 +105,17 @@ Look specifically for a **"do not rebuild this"** section, a prior rejected issu
 invariant. If a recorded principle already settles it, say so and cite the file — that is the
 difference between a verdict and an opinion.
 
+**What counts as settling it, and what does not.** A *decision* settles it: a design doc or ADR that
+states the intent, an explicit prior human approval, a documented invariant. **Existing partial
+implementation does not.** A stub, a pending panel, a parameter the client already sends, a flag
+documented as "awaiting backend" — these record that someone *started*, not that anyone *decided*.
+Treating them as settlement is the same can/should confusion in a different costume, and it is the
+one this step is most likely to fall for, because half-built scaffolding looks like consensus.
+
+The console panels in `rift-cluster` #365/#366 were exactly this: drawn, wired to a `PendingPanel`,
+their reasoning written out in the source — and wrong. If the only evidence that a thing should
+exist is that part of it already does, the should-question is still open.
+
 ### The three outcomes
 
 | Verdict | When | What the caller does |
