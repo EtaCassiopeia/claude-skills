@@ -116,6 +116,12 @@ The console panels in `rift-cluster` #365/#366 were exactly this: drawn, wired t
 their reasoning written out in the source — and wrong. If the only evidence that a thing should
 exist is that part of it already does, the should-question is still open.
 
+**An issue's own `## Should this exist?` section is an input, not a verdict.** `file-finding` asks
+the agent filing a finding to mark the question `SETTLED` (with a citation) or `OPEN`. `OPEN` is
+reliable — take it and go. `SETTLED` is a *claim*: follow the citation and judge it by the paragraph
+above. A filer citing a stub, a mockup or a half-built panel has recorded the same can/should
+confusion in a more confident voice, and confidence is not evidence.
+
 ### The three outcomes
 
 | Verdict | When | What the caller does |
