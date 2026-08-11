@@ -283,9 +283,9 @@ and two sessions implementing the same issue.
 9. **Write the run-log** at the path you claimed in `0·claim` — `.rift-ship/worklist.md` when you own
    it, else `.rift-ship/worklist-run<N>.md` (create the dir): a header line recording the run's id,
    mode, the step-3 branch pattern and the step-8 `stacks:` outcome, then one row per issue with columns
-   `issue | title | base | status | pr | attempts | docs | downstream | notes`, all `status=pending`
-   and `attempts=0`. Where each column is filled: `docs` at 1c-docs, `downstream` at 1f-cross,
-   `attempts` incremented on every `fix-issue` invocation at 1c. The escalation outcome is written
+   `issue | title | base | status | pr | attempts | gate | docs | downstream | notes`, all
+   `status=pending` and `attempts=0`. Where each column is filled: `gate` at 1c, `docs` at 1c-docs,
+   `downstream` at 1f-cross, `attempts` incremented on every `fix-issue` invocation at 1c. The escalation outcome is written
    **inside the `attempts` cell**, not in `notes`: a 1e→1c escalation reads `2 (esc:rescued)` or
    `2 (esc:failed)` once its outcome is known. This file is the
    durable source of truth for resume **and the only record the Phase 2 report can be built from** —
@@ -462,6 +462,15 @@ below both read, and it is only correct if it is written here, at the invocation
 - **Success** (verify gate green, no unresolved review blockers) → proceed to 1c-docs.
 - **Failure** (cap exhausted / Remaining Blockers Report) → set `status=blocked`, copy the blockers
   summary into the run-log notes, and `continue`. Do **not** open a PR for broken work.
+
+**Record the gate's shape in the `gate` cell**, from `fix-issue`'s ship report: the number of tests
+added and the total (`+9/214`), plus a mutation result when the sub-skill produced one
+(`+9/214 mut 6/7`), else just the counts. This costs one number copied out of a report you already
+have, and it is the only thing in the run-log that describes the *quality* of what shipped rather
+than the fact that it shipped. Without it, every merged issue reads identically whether its gate was
+nine discriminating tests or one that asserts `true`, and questions about whether the loop's gate
+discipline is actually working — or whether a cap should move — have no evidence behind them but
+impressions. Blank it (`gate: —`) for issues that never reached 1c.
 
 **1c-docs — Documentation is part of "done" (before you leave 1c).** A change that ships new or
 changed behaviour is not complete until the docs a user or maintainer would consult are updated **in
@@ -696,8 +705,13 @@ When every issue is in a terminal status (`merged` / `pr-open` / `deferred(<mode
 `blocked-upstream(<what>)` / `owned-by-run<N>` / `umbrella-expanded` / `umbrella-done` /
 `umbrella-manual`), print a summary table:
 
-| Issue | Title | Base | Status | PR | Attempts | Docs | Downstream | Notes |
-|-------|-------|------|--------|----|----------|------|------------|-------|
+| Issue | Title | Base | Status | PR | Attempts | Gate | Docs | Downstream | Notes |
+|-------|-------|------|--------|----|----------|------|------|------------|-------|
+
+The **Gate** column carries each implemented issue's tests-added/total (and mutation result where
+one exists) from 1c. Read down it: a batch whose merged issues all show one or two added tests is
+telling you the gate is tracking the issue's bullet list rather than the change's real surface, and
+that is visible here and nowhere else.
 
 The **Docs** column records the doc outcome from 1c-docs for each implemented issue — the files
 touched, or `n/a — <why>` when genuinely exempt. It makes the "docs are part of done" gate auditable
@@ -762,7 +776,7 @@ row in `.rift-ship/ACTIVE-RUNS.md` to `status=DONE (<YYYY-MM-DD>)`. A report tha
 the conversation is gone the moment the session is — which is both a problem for the human reading the
 results of an unattended overnight run, and the reason questions like *does the 1e→1c retry ever
 actually rescue an issue?* or *which caps bind in practice?* cannot be answered today. Along with the
-table, carry over each issue's `attempts` cell verbatim (including any `(esc:rescued)` /
+table, carry over each issue's `attempts` and `gate` cells verbatim (including any `(esc:rescued)` /
 `(esc:failed)` annotation) plus any failure signature written in 1e·mem. Cheap to write, and the only
 evidence base for tuning the caps later — change them from measurements, not impressions.
 
