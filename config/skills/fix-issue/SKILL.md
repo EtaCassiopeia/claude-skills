@@ -29,6 +29,13 @@ So the gate is designed **first**, **from** the acceptance criteria, and the fai
 written **before** any implementation. The objective verify pipeline — not a review agent's
 opinion — is the source of truth for "done."
 
+**The gate is a floor, not a specification.** Design the change (Phase 2.5) *before* designing its
+gate, and implement that design in full — not just the slice the tests happen to pin down. This
+ordering is deliberate and it is what separates this loop from incremental red-green TDD: an agent
+told to write a test and then the minimal code to pass it makes locally-minimal decisions, locks
+them in, and leaves anything untested unimplemented. Design → gate → implement keeps the upfront
+architecture step that produces the better design, and still gets tests written before code.
+
 Work through the phases **in order**. After every Verify failure or Review blocker, enter the
 **Fix Phase** and return to Phase 5. The durable **run-log** is updated at the end of every
 phase and every fix cycle, so the loop survives context compaction and stays auditable.
@@ -40,7 +47,9 @@ never ship code that doesn't pass the gate.
 Subagents inherit the session model unless pinned — on an expensive top-level model that
 multiplies review cost ×4 per issue. **Always pass an explicit `model` to every Agent call**
 per the table in each phase (broad exploration: Phase 2 → haiku; implementation: Phase 4 →
-sonnet; review: Phase 6 → opus/sonnet; simplify: Phase 7 → haiku). The objective verify pipeline
+sonnet; review: Phase 6 → opus/sonnet; simplify: Phase 7 → haiku). Two phases are **never
+delegated at all** — the design (Phase 2.5) and the gate (Phase 3) are the top-level model's
+judgment, and they are what everything downstream is measured against. The objective verify pipeline
 and the adversarial review — not the main loop's model horsepower — are what guarantee
 correctness, so cheaper agents are safe wherever their output is re-verified. That is also why
 the top-level model you *start* on matters most for cost: prefer the cheapest model that can
@@ -144,24 +153,83 @@ If a file is not in that list, do not touch it.
 
 ---
 
+## Phase 2.5 — Design (before the gate, before the code)
+
+**Decide the shape of the change here, in one pass, while nothing is committed to yet.** This
+phase exists because the alternative is deciding it implicitly — one assertion at a time, inside
+Phase 3 — and decisions made that way are locally minimal, never revisited, and silently cap what
+Phase 4 builds. Design is also the cheapest thing in this loop to redo: it is prose in the
+run-log, not a diff.
+
+Record in the run-log, before writing a single test:
+
+1. **Data & state model** — the types this change introduces or alters. Make invalid states
+   unrepresentable; prefer a newtype/`opaque type` over a bare primitive; prefer an `enum`/ADT
+   over a boolean pair. Name each type and its invariant.
+2. **Error model** — every way this can fail, and which channel carries it (typed error vs defect,
+   `thiserror` vs `anyhow`, `IO[E, A]` vs `Task`). Name the failure modes explicitly; the ones you
+   do not name here are the ones that get swallowed in Phase 4.
+3. **Contracts** — for each new or changed public function: inputs, output, preconditions,
+   what it guarantees. One line each.
+4. **Boundaries** — which module each piece lands in, and why that one. Reuse the Phase 2
+   `reuse:` list; if you are adding an abstraction, say what existing thing was insufficient.
+5. **Edge cases** — enumerate them: empty/zero/boundary inputs, concurrent access, partial
+   failure, ordering. This list is an input to Phase 3, and it is normally *longer* than the
+   issue's acceptance criteria. Criteria say what a person asked for; this says what the code
+   must survive.
+
+Rules for this phase:
+
+- **Stays in the main loop.** You may spawn an `architect` agent (`model: sonnet`) to lay out
+  *options* on a genuinely open design question, but the decision and the written design are
+  yours — this is the judgment the top-level model is being paid for.
+- **Design the issue, not a platform.** Scope is still exactly what Phase 0 recorded. An upfront
+  design step is not an invitation to generalize; it is how you avoid re-deciding the same thing
+  five times at assertion granularity.
+- **If the design surfaces an open question the issue does not settle** — competing approaches
+  with real trade-offs, a new abstraction whose shape is a judgment call — stop and ask it now,
+  per the Phase 0 model-fit check. Answering it after the tests are written costs a rewrite of
+  the gate too.
+- **Keep it short.** Five headings, a few lines each. A design longer than the diff it describes
+  is a smell.
+
+---
+
 ## Phase 3 — Gate Spec (Verifier-First)
 
 **This is the core of the loop. Design the verifier before the implementation.**
 
-For **each** acceptance criterion, define a concrete, machine-checkable check:
-- a **named test** to write (preferred), or
-- a command whose output objectively proves the criterion.
+The gate is derived from **two** sources, not one: the Phase 0 **acceptance criteria** and the
+Phase 2.5 **edge cases**. Criteria alone produce a thin one-test-per-bullet gate that tracks what
+was asked for and misses what the code has to survive.
 
-Record the criterion → check map in the run-log. This is the contract the implementation must satisfy.
+For **each** acceptance criterion *and* each Phase 2.5 edge case, define a concrete,
+machine-checkable check:
+- a **named test** to write (preferred), or
+- a command whose output objectively proves it.
+
+Record the criterion/edge-case → check map in the run-log. This is the contract the implementation
+must satisfy — a floor, not a ceiling (Phase 4 implements the whole design, not just this).
 
 **Then write the tests first** — before any production code:
 - Unit tests: `#[cfg(test)] mod tests` in the same file (Rust) or `object XSpec extends ZIOSpecDefault` (Scala)
 - Integration tests: `tests/` directory when end-to-end behaviour must be verified
-- Cover the happy path and the key failure/edge cases from the issue
+- Cover the happy path, the Phase 2.5 failure modes, and the Phase 2.5 edge cases
 
-Run the new tests and confirm they **fail for the right reason** (red) — a test that passes
-before you've implemented anything is not exercising the criterion. Record the red result in the
-run-log.
+**No tautological tests.** A test states its expected value **literally**. It must never compute
+the expectation by calling the code under test, by re-implementing that code's algorithm in the
+test body, or by round-tripping through the thing being verified (`assert_eq!(parse(s),
+parse(s))`, `expected = format(x)` then asserting `format(x) == expected`). Such a test passes
+against any implementation, including a wrong one, and writing it before the code does **not**
+prevent it — it is the failure mode that survives test-first discipline. Round-trip properties are
+legitimate only as a *supplement* to literal-value tests, never as the sole check for a criterion.
+
+Run the new tests and confirm they **fail for the right reason** (red). Record the **verbatim
+failure output** in the run-log — the assertion message, expected-vs-actual, or the compile error
+— not the word "red". A test that passes before you've implemented anything is not exercising the
+criterion; and a red you did not read is only evidence that you ran the suite, not that the test
+discriminates. If the red is a bare compile error because the API does not exist yet, that is
+normal — note it as such, and re-confirm the assertion actually discriminates once it compiles.
 
 **You own the gate.** The tests are designed and written here, in the main loop — this is the
 quality-critical judgment and is never delegated. Whoever writes the *implementation* (you, or a
@@ -179,8 +247,19 @@ Production rules (from CLAUDE.md) that govern everything you write from here:
 
 ## Phase 4 — Implement
 
-Write the **minimal** production code to turn the Phase 3 tests green. Do not add scope beyond
-what the gate requires.
+Implement the **Phase 2.5 design in full**, and turn the Phase 3 tests green.
+
+**The gate is the floor, not the ceiling.** Do not write the minimal code that satisfies the
+tests: the tests are a sample of the design, and code shaped to pass exactly that sample leaves
+every unsampled behaviour — an unhandled error variant, an edge case whose test was harder to
+write, an invariant the type system was supposed to carry — quietly unimplemented, with a green
+pipeline reporting success. Every element of the Phase 2.5 design ships: the types and their
+invariants, every named failure mode routed to its channel, every contract honoured.
+
+**Scope is still the issue, not the gate.** "Implement the design fully" is not licence to
+broaden: the design was itself scoped to Phase 0's change-required in Phase 2.5, and nothing
+outside it gets built here. If implementing the design reveals it was wrong, fix the design in
+the run-log and say so — do not silently diverge from it.
 
 **Delegated implementation (default for mechanical work; quality-neutral by construction).**
 The loop's quality guarantee is the gate (Phase 3, main-loop-owned) plus adversarial review
@@ -188,16 +267,22 @@ The loop's quality guarantee is the gate (Phase 3, main-loop-owned) plus adversa
 to a **`general-purpose` (or your `developer`) agent on `model: sonnet`** with no effect on what
 ships, *provided the guardrails below hold*. Decide per issue:
 
-- **Delegate** when the work is mechanical against a well-formed gate: clear target list, the
-  approach is settled, changes are localized.
+- **Delegate** when the work is mechanical against a well-formed gate **and a written Phase 2.5
+  design**: clear target list, the approach is settled, changes are localized. The design is what
+  makes delegation safe here — it is the part a cheaper model would get wrong, and it is already
+  decided.
 - **Keep in the main loop** when the issue is design-heavy, cross-cutting, or the approach is
   still unsettled — there the main loop's judgment is the value, and delegation would risk it.
   (Record which mode you chose in the run-log.)
 
 The delegation brief must be self-contained — the agent has none of this conversation's context:
 - the worktree path (all edits happen there; never touch files outside the Phase 2 target list);
-- the run-log's Change-required, Acceptance-criteria, and Targets (files to modify, utilities to
-  reuse — so it doesn't reinvent existing abstractions);
+- the run-log's Change-required, Acceptance-criteria, Targets (files to modify, utilities to
+  reuse — so it doesn't reinvent existing abstractions), **and the full Phase 2.5 Design section**
+  (types, error model, contracts, boundaries, edge cases) — verbatim, since the design is what it
+  is implementing;
+- that it implements **the design**, not the minimum that passes the tests: every named failure
+  mode and edge case is handled even where no test pins it down;
 - that the **gate tests already exist and are immutable** — it writes production code to make
   them pass and must NOT weaken, delete, or edit any test (if one looks wrong, report back);
 - the production rules (no `unwrap`/`panic!`/`todo!`, errors propagate, comments only for a
@@ -266,7 +351,10 @@ inherit the session model, multiplying cost):
    diff contains no error handling code. (Not haiku: this agent's findings are historically
    the highest-severity — cfg-scope breaks, masked failures — and need real reasoning.)
 3. **`pr-review-toolkit:pr-test-analyzer`** — `model: sonnet` — do the gate tests actually
-   cover every acceptance criterion? Are edge cases tested?
+   cover every acceptance criterion **and every Phase 2.5 edge case and failure mode** (pass it
+   both lists)? Are there tautological tests — ones whose expectation is computed by the code
+   under test, or that would pass against a wrong implementation? Ask it explicitly; that class
+   survives test-first discipline and is invisible to a coverage number.
 4. **Language best-practices / anti-pattern lens** — `general-purpose`, `model: sonnet` — idioms,
    anti-patterns, and code style graded against the repo's **language skill**, NOT correctness
    (that's agent #1). The other three agents catch bugs, swallowed errors, and coverage gaps but
@@ -290,6 +378,7 @@ The verify pipeline is the objective gate; review findings are **advisory**. Cla
 |-------|----------|--------|
 | **Blocker** | Confidence ≥ 80 (Important or Critical) from any agent | Must fix |
 | **Blocker** | An acceptance criterion has no covering test | Must fix |
+| **Blocker** | A Phase 2.5 failure mode or edge case is unimplemented, or a test is tautological | Must fix |
 | **Non-blocker** | Confidence < 80 (Suggestion) | Log; apply only if trivially safe |
 
 **Gate check:**
@@ -343,19 +432,22 @@ Output this block when the gate passes:
 ### What changed
 - <bullet — one line per meaningful change>
 
-### Acceptance criteria → gate
+### Design
+- <one line per Phase 2.5 decision that shaped the diff>
+
+### Acceptance criteria + edge cases → gate
 - [x] <criterion 1> — covered by test `<test_name>`
-- [x] <criterion 2> — covered by test `<test_name>`
+- [x] <edge case 1> — covered by test `<test_name>`
 
 ### Verification
-| Check               | Result                        |
-|---------------------|-------------------------------|
-| fmt / scalafmt      | PASS (auto-fixed if needed)   |
-| clippy / compile    | PASS — zero warnings          |
-| tests               | PASS — N total, M new         |
-| code-reviewer       | PASS — no blockers            |
-| silent-failures     | PASS / SKIPPED (no error code)|
-| test coverage       | PASS — all criteria covered   |
+| Check               | Result                          |
+|---------------------|---------------------------------|
+| fmt / scalafmt      | PASS (auto-fixed if needed)     |
+| clippy / compile    | PASS — zero warnings            |
+| tests               | PASS — N total, M new           |
+| code-reviewer       | PASS — no blockers              |
+| silent-failures     | PASS / SKIPPED (no error code)  |
+| test coverage       | PASS — criteria + edge cases    |
 
 ### Fix cycles used: N / 3
 ### Run-log: <scratchpad>/fix-issue-<N>.md
@@ -399,12 +491,19 @@ Write this to `<scratchpad>/fix-issue-<N>.md` in Phase 0 and update it every pha
 # Run-Log: Issue #<N> — <title>
 worktree: .claude/worktrees/issue-<N>   branch: fix/issue-<N>
 
-## Acceptance criteria → gate
-- [ ] <criterion> → test `<name>` (red confirmed: <yes/no>)
-
 ## Targets
 - files: <list>
 - reuse: <existing utilities>
+
+## Design (Phase 2.5 — written before any test)
+- types & invariants: <...>
+- error model / failure modes: <...>
+- contracts: <fn> — <in> → <out>, guarantees <...>
+- boundaries: <module> because <...>
+- edge cases: <enumerated>
+
+## Acceptance criteria + edge cases → gate
+- [ ] <criterion or edge case> → test `<name>` (red output: `<verbatim failure line>`)
 
 ## Cycles (budget 3)
 - cycle 0: verify=<pass/fail> review=<blockers>  fixes: <...>
