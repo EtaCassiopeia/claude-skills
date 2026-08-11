@@ -1,6 +1,6 @@
 ---
 name: ship-issues
-description: "Orchestrate the full per-issue pipeline over a set of GitHub issues — triage -> fix-issue -> commit-push-pr -> babysit-prs -> merge — in a resumable serial loop that fixes-on-fail until each issue is merged. Cheap phases run on Haiku subagents; fix-issue runs on the session model. Issues triage routes to a model the session can't cover (e.g. design-heavy -> Fable) are deferred with a relaunch command. Usage: /ship-issues [<issue-number>...] [--all] [--label <name>] [--no-merge] [--force-model] [--admin-merge]"
+description: "Orchestrate the full per-issue pipeline over a set of GitHub issues — triage -> fix-issue -> commit-push-pr -> babysit-prs -> merge — in a resumable serial loop that fixes-on-fail until each issue is merged. Triage gates on desirability first: an issue judged rejected-by-design or carrying an open should-question is never implemented. Cheap phases run on Haiku subagents; fix-issue runs on the session model. Issues triage routes to a model the session can't cover (e.g. design-heavy -> Fable) are deferred with a relaunch command. Usage: /ship-issues [<issue-number>...] [--all] [--label <name>] [--no-merge] [--force-model] [--admin-merge]"
 user_invocable: true
 argument-hint: "[<issue-number>...] | --all | --label <name> [--no-merge] [--force-model] [--admin-merge]"
 allowed-tools:
@@ -45,6 +45,11 @@ rules, isolate failures so one bad issue never blocks the rest, and produce an a
 
 - **Merge is the goal, not the PR.** By default the loop does not stop at "PR opened" — it babysits
   each PR to green CI and merges it, fixing-on-fail in between. `--no-merge` stops at green-CI PR.
+- **But shipping the wrong thing is worse than shipping nothing.** Every other gate in this pipeline
+  is a *can* question — is it specified, does it compile, is it green. Only 1a's desirability verdict
+  asks whether it *should* exist, and an issue can be accurate in every factual claim and still be
+  wrong. When that verdict says stop, the run stops for that issue and asks a person; it does not
+  reason its way past it.
 - **Serial, not parallel.** One issue at a time. `fix-issue` isolates each in its own git worktree,
   but PRs land on shared base branches; serial keeps merges conflict-free and the run legible. Do
   **not** fan out issues to parallel subagents.
@@ -364,14 +369,36 @@ Never pipeline the *implementation* (fix-issue is inline/serial by construction)
 red or unmergeable PR. When in doubt, stay strictly serial — it is always correct, just slower.
 
 ### 1a — Triage & route (Haiku subagent)
-Delegate `triage-issue` for N to a **Haiku subagent**. Use its verdict to:
-1. **Screen out non-implementable issues** — if triage says the issue needs human design or is a
+Delegate `triage-issue` for N to a **Haiku subagent**. It returns **two** verdicts — desirability
+first, then model. Use them to:
+
+1. **Honour the desirability verdict — this gate comes first, and it is not overridable by
+   `--force-model`** (that flag governs which *model* implements an issue, never whether it should
+   exist).
+   - `rejected-by-design` → set `status=rejected-by-design`, record the should-question and the
+     recorded principle it cites, and `continue`. **Do not implement.** Surface it in the Phase 2
+     report with the recommendation to close the issue as *not planned* — and note anything the repo
+     is still advertising (a pending panel, a stub, a doc promise), because a capability that is
+     never coming should stop being promised.
+   - `question-design` → set `status=needs-design(should)`, record the one-sentence should-question
+     verbatim, and `continue`. **Do not implement.** This is a question for a person, and the whole
+     value is asking it *now*, while declining costs one comment rather than a merged PR.
+   - `build` → proceed to (2).
+
+   Neither counts as a failure for the circuit breakers — like `deferred`, they are correct skips.
+
+   **Do not soften a desirability verdict because the issue looks well-written.** An issue can be
+   precise, well-researched and factually correct in every claim and still be rejected: that is the
+   exact shape of `achird-labs/rift-cluster` #365/#366, which cleared implementability triage and
+   independent premise checks before a human refused them outright.
+
+2. **Screen out non-implementable issues** — if triage says the issue needs human design or is a
    question/underspecified, set `status=needs-design` and `continue`.
-2. **Route by model** per *Model routing & deferral* above: if the session model covers triage's
+3. **Route by model** per *Model routing & deferral* above: if the session model covers triage's
    recommendation (or `--force-model` is set), proceed on the session model. If triage recommends a
    peer model the session can't cover (e.g. **Fable** for a design-heavy issue on an Opus session),
    set `status=deferred(<model>)`, record it, and `continue` — do not implement it in this run.
-3. **Note complexity** in the run-log.
+4. **Note complexity** in the run-log.
 
 ### 1b — Choose the PR base branch
 Determine the base **before** implementing, from the **target repo's** convention (this skill runs
@@ -665,8 +692,9 @@ No `graphify-out/` → skip silently; this is a no-op in repos without a graph.
 ## Phase 2 — Final report
 
 When every issue is in a terminal status (`merged` / `pr-open` / `deferred(<model>)` /
-`needs-design` / `blocked` / `pr-red` / `blocked-upstream(<what>)` / `owned-by-run<N>` /
-`umbrella-expanded` / `umbrella-done` / `umbrella-manual`), print a summary table:
+`rejected-by-design` / `needs-design(should)` / `needs-design` / `blocked` / `pr-red` /
+`blocked-upstream(<what>)` / `owned-by-run<N>` / `umbrella-expanded` / `umbrella-done` /
+`umbrella-manual`), print a summary table:
 
 | Issue | Title | Base | Status | PR | Attempts | Docs | Downstream | Notes |
 |-------|-------|------|--------|----|----------|------|------------|-------|
@@ -698,6 +726,15 @@ Then, grouped for action:
   group — e.g. "design-heavy → Fable: run `/ship-issues 14 22` in a Fable session".
 - **Umbrellas**: `umbrella-expanded` (list the child issues enqueued), `umbrella-done`
   (dischargeable — suggest closing), `umbrella-manual` (needs a human to split into issues).
+- **rejected-by-design**: issues triage judged should not be built, each with the should-question and
+  the recorded principle it contradicts. Recommend closing as *not planned* — and name anything the
+  repo still advertises for them (a pending panel, a stub, a doc promise), since a capability that is
+  never coming should stop being promised. These are **not failures**; a run that refuses a bad issue
+  did its job.
+- **needs-design(should)**: issues where a *should*-question is open and unanswered. State the
+  one-sentence question verbatim — the whole point is that a person can answer it in one reply.
+  Distinguish these clearly from `needs-design` below: that one means "we do not know *how*", this
+  one means "we have not established *whether*".
 - **needs-design**: issues triage flagged as underspecified — need human input before implementing.
 - **blocked / pr-red**: the one-line blocker per issue and the suggested next step.
 - **blocked-upstream**: issues the dependency graph screened out (step 6), each with the open issue or
@@ -713,7 +750,9 @@ Then, grouped for action:
 
 State counts plainly (e.g. "7 issues: 4 merged, 2 deferred (Fable), 1 needs-design; 3 findings
 filed (#331-#333, held for triage)"). Never report an issue as merged that `babysit-prs` didn't
-actually merge; never report `pr-open` as done.
+actually merge; never report `pr-open` as done. Report a `rejected-by-design` as its own outcome
+rather than folding it into the skips — "1 rejected-by-design" is a result the run produced, and
+burying it invites someone to re-file the same issue next month.
 
 **Persist the report.** Write the same table and groupings to
 `.rift-ship/reports/<YYYY-MM-DD>-<mode>.md` in addition to printing them — suffixed `-run<N>` whenever
@@ -815,7 +854,8 @@ loop is built to make that a **pause, not a loss**:
     `blocked`/`pr-red`. Catches the intermittent version of the same thing — a flaky required check
     that kills every *other* issue never trips a consecutive counter, but a run losing most of its
     worklist is not one to leave running unattended.
-  - `deferred(<model>)`, `needs-design`, `blocked-upstream(...)`, `owned-by-run<N>` and the umbrella
+  - `deferred(<model>)`, `rejected-by-design`, `needs-design(should)`, `needs-design`,
+    `blocked-upstream(...)`, `owned-by-run<N>` and the umbrella
     statuses are **not** failures and count toward neither breaker — they are correct skips, and a run made mostly of them
     is working as designed.
   - On either trip: report which breaker fired and why, list the remaining `pending` issues, and stop.
