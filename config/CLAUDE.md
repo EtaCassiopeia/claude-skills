@@ -171,18 +171,25 @@ AppleScript. Use when WebFetch returns truncated/paywalled content the user
 says their browser can see.
 
 ```bash
-# Open URL in a new Chrome tab, wait for load, return rendered text, close tab
+# Open URL in a new Chrome tab, wait for load, return the main content as
+# markdown (site chrome stripped), close tab
 curl -s -X POST http://localhost:8765/browser/fetch \
   -H 'Content-Type: application/json' \
-  -d '{"url":"https://medium.com/some-article"}'
-# → {"url":"…","title":"…","content":"rendered page text"}
+  -d '{"url":"https://medium.com/some-article","max_chars":40000}'
+# → {"url":"…","title":"…","content":"# Heading\n\n…","truncated":false}
 
 # Read whatever tab the user currently has focused ("read this page")
-curl -s http://localhost:8765/browser/tab
+curl -s 'http://localhost:8765/browser/tab?max_chars=40000'
 ```
 
-Options for `/browser/fetch`: `wait_secs` (default 20, cap 120), `format`
-(`"text"` default | `"html"`), `keep_tab` (bool). Only `http(s)` URLs.
+Options (both endpoints; `/browser/tab` takes them as query params):
+`format` (`"markdown"` default — main content only; `"text"` = whole-page
+innerText; `"html"` = full DOM), `max_chars` (cap content, sets
+`truncated:true`), `include_links` (default false — link *text* is always
+kept, only the URLs are dropped; turn on when you need to follow links),
+`wait_secs` (default 20, cap 120), `keep_tab` (bool). Only `http(s)` URLs.
+If markdown extraction picks the wrong block on some page, retry with
+`"format":"text"`.
 If it errors mentioning "Allow JavaScript from Apple Events" or Automation
 permission, relay the fix from the error message to the user — both are
 one-time manual Chrome/macOS settings.
