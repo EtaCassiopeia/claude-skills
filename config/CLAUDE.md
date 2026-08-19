@@ -118,8 +118,9 @@ manually** — route it through the local `claude-sidecar` instead.
    `curl`, `grep`, `find`, `jq`, `security`, …)? → POST `http://localhost:8765/exec` — buffered JSON response, 60s
    timeout.
 3. **Is it a web page WebFetch can't read** (paywall, login wall, Cloudflare
-   block) that the user's own browser can? → POST
-   `http://localhost:8765/browser/fetch` (browser bridge — see below).
+   block) that the user's own browser can, **or a YouTube video** whose spoken
+   content you need? → POST `http://localhost:8765/browser/fetch` (browser
+   bridge — see below).
 4. **Is the sidecar not running?** → start it with `claude-sidecar &`.
 
 Allowed: gh, git, go, sbt, cargo, mvn, gradle, npm, node, python3, pytest, curl, docker, docker-compose, grep, rg, find, ls, cat, head, tail, wc, diff, sed, awk, sort, uniq, cut, tr, xargs, cp, mv, rm, mkdir, touch, chmod, jq, yq, which, env, printenv, echo, printf, date, uname, security
@@ -190,6 +191,34 @@ kept, only the URLs are dropped; turn on when you need to follow links),
 `wait_secs` (default 20, cap 120), `keep_tab` (bool). Only `http(s)` URLs.
 If markdown extraction picks the wrong block on some page, retry with
 `"format":"text"`.
+
+**YouTube videos.** A watch URL (`/watch?v=…` or `/shorts/…`) returns the
+video's **transcript** instead of the page — no extra options, the default
+`markdown` format does it:
+
+```bash
+curl -s -X POST http://localhost:8765/browser/fetch \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://www.youtube.com/watch?v=…","max_chars":40000}'
+```
+
+You get `# title`, then a fact list (channel, published, duration, views,
+captions), the description, `## Related videos` as markdown links, and
+`## Transcript` as `[mm:ss]`-stamped paragraphs. Sections run shortest-first,
+so `max_chars` clips the transcript tail and leaves the metadata and links
+intact. This is the cheap way to answer "what does this video say?" — don't
+ask the user to summarise it, and don't try `youtube.com` with WebFetch, which
+sees no transcript at all.
+
+Caveats: the transcript comes from YouTube's own "Show transcript" panel, which
+`/browser/fetch` opens in its throwaway tab. `/browser/tab` deliberately does
+*not* click anything in the user's live tab, so there you get metadata and
+related videos but a transcript only if the user already opened the panel — to
+transcribe a video the user is watching, read the URL from `/browser/tab` and
+re-request it via `/browser/fetch`. A video with no captions still returns
+metadata, with the transcript section stating why it is empty — that message is
+the real answer, not a failure to retry. `"format":"text"` reads a watch page as
+an ordinary page.
 If it errors mentioning "Allow JavaScript from Apple Events" or Automation
 permission, relay the fix from the error message to the user — both are
 one-time manual Chrome/macOS settings.
