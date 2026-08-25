@@ -436,6 +436,35 @@ def changed_since(root: Path, sha: str, paths: list[str]) -> list[str]:
     return [ln for ln in out.splitlines() if ln.strip()]
 
 
+def changed_without_doc(root: Path, sha: str, doc: str, code_paths: list[str]) -> dict[str, list[str]]:
+    """Code files changed since `sha` by at least one commit that did NOT also touch `doc`.
+
+    A commit that edits a document together with the code it describes is the synced case —
+    the PR that made the change updated the doc (or re-read it) in the same review. Only code
+    changed *without* the doc is evidence the doc may now be lying. Returns {file: [short shas]}.
+    """
+    if not sha or not code_paths:
+        return {}
+    log = sh(["git", "log", "--format=%h", "--name-only", f"{sha}..HEAD", "--"] + code_paths + [doc], root)
+    suspects: dict[str, list[str]] = defaultdict(list)
+    commit, files = None, []
+    def flush():
+        if commit and doc not in files:
+            for f in files:
+                if f in code_paths:
+                    suspects[f].append(commit)
+    for ln in log.splitlines():
+        if not ln.strip():
+            continue
+        if re.fullmatch(r"[0-9a-f]{7,12}", ln.strip()):
+            flush()
+            commit, files = ln.strip(), []
+        else:
+            files.append(ln.strip())
+    flush()
+    return dict(suspects)
+
+
 def check_index(root: Path, cites: list[Citation], decisions: dict[str, Decision]) -> list[Finding]:
     findings: list[Finding] = []
     index = load_index(root)
@@ -469,19 +498,15 @@ def check_index(root: Path, cites: list[Citation], decisions: dict[str, Decision
             continue
         globs = meta.get("code") or []
         described = [f for f in all_files if any(fnmatch.fnmatch(f, g) or fnmatch.fnmatch(f, g.replace("**", "*")) for g in globs)]
-        watch = sorted(set(described) | citing.get(doc, set()) | {doc})
-        changed = changed_since(root, sha, watch)
-        if not changed:
-            continue
-        doc_itself = doc in changed
-        code_changed = [f for f in changed if f != doc]
-        if code_changed and not doc_itself:
-            sample = ", ".join(code_changed[:4]) + (f" (+{len(code_changed) - 4})" if len(code_changed) > 4 else "")
-            findings.append(Finding("warning", "doc-stale", f"{doc} verified at {sha[:9]}; code it describes changed since: {sample}", doc, 1))
-        elif doc_itself and not code_changed:
-            findings.append(Finding("info", "doc-edited-since-verify", f"{doc} was edited after its last verification at {sha[:9]} — re-verify or --mark-verified", doc, 1))
-        else:
-            findings.append(Finding("warning", "doc-stale", f"{doc} and the code it describes both changed since {sha[:9]}; re-verify", doc, 1))
+        watch = sorted(set(described) | citing.get(doc, set()))
+        suspects = changed_without_doc(root, sha, doc, watch)
+        doc_itself = bool(changed_since(root, sha, [doc]))
+        if suspects:
+            files = sorted(suspects)
+            sample = ", ".join(f"{f} ({','.join(suspects[f][:2])})" for f in files[:4]) + (f" (+{len(files) - 4})" if len(files) > 4 else "")
+            findings.append(Finding("warning", "doc-stale", f"{doc} verified at {sha[:9]}; code it describes changed without the doc: {sample}", doc, 1))
+        elif doc_itself:
+            findings.append(Finding("info", "doc-edited-since-verify", f"{doc} was edited after its last verification at {sha[:9]} (with or without its code) — re-verify or --mark-verified", doc, 1))
     return findings
 
 
