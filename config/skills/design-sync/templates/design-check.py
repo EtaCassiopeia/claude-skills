@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# design-check: ignore-file — the docstring below quotes example tokens; this file cites nothing.
 """Design <-> code coherence check. Deterministic, stdlib only, no LLM.
 
 The repo's design lives in `docs/` and is cited from code, tests and other docs with a small
@@ -19,8 +20,9 @@ This script is the mechanical half of keeping the two in sync:
   design-check.py --strict        exit 1 on errors (CI); warnings never fail
   design-check.py --json          machine-readable report
   design-check.py --mark-verified <doc>...
-                                  record HEAD as the sha at which <doc> was re-read against the
-                                  code. Records the claim; does not make it true.
+                                  record the sha at which <doc> was re-read against the code
+                                  (the merge-base with origin/master, so the sha survives a
+                                  squash merge). Records the claim; does not make it true.
 
 Errors (fail --strict)         Warnings (advisory)
   unresolved citation            superseded decision cited from code
@@ -651,8 +653,13 @@ def diff_report(root: Path, ref: str | None, decisions: dict[str, Decision], cit
 
 
 def mark_verified(root: Path, docs: list[str]) -> list[str]:
-    head = sh(["git", "rev-parse", "--short=9", "HEAD"], root).strip()
-    today = sh(["git", "log", "-1", "--format=%cs", "HEAD"], root).strip()
+    # Record the merge-base with origin/master, not HEAD: a branch commit is squashed away on
+    # merge and a sha that no longer exists makes every later staleness diff silently empty.
+    # The merge-base is the last tree that is (or will be) on master, which is the tree the
+    # doc was read against in every case that matters.
+    base = sh(["git", "merge-base", "origin/master", "HEAD"], root).strip() or "HEAD"
+    head = sh(["git", "rev-parse", "--short=9", base], root).strip()
+    today = sh(["git", "log", "-1", "--format=%cs", base], root).strip()
     p = root / INDEX
     text = p.read_text(encoding="utf-8")
     msgs = []
