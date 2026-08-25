@@ -492,6 +492,15 @@ explicit gate here, not an afterthought. In the worktree, before 1d:
   don't skip silently.
 - Record what you touched in the run-log (`docs: <files>`), and include the doc change in the 1d PR
   body so a reviewer sees the behaviour and its documentation together.
+- **Design of record** (only when the repo has the design-sync practice — `scripts/design-check.py`
+  exists or CLAUDE.md declares `design-check:`): run `python3 <design-check> --diff <worktree>`;
+  every document under CODE → DESIGN marked `[NOT changed]` is either confirmed still accurate or
+  amended in this worktree (a `D-n` in `docs/decisions/DECISIONS.md` + `> **Amended by D-n**`
+  callout + code citation + test pin). Then `python3 <design-check> --strict` must exit 0. The
+  1d PR body carries exactly one of `Design: unchanged — <docs>, confirmed` / `Design: amended —
+  D-n` / `Design: n/a — <why>`; record the same in the run-log (`design: …`). A decision the
+  user or a reviewer made during this issue that is not a `D-n` by 1d is a blocker, not a
+  follow-up.
 
 ### 1d — Commit, push, open the PR (Haiku subagent)
 Delegate **`commit-push-pr`** for N's worktree/branch to a **Haiku subagent**, targeting the base

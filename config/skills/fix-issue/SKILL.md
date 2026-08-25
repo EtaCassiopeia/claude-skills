@@ -163,6 +163,17 @@ run-log, not a diff.
 
 Record in the run-log, before writing a single test:
 
+0. **Design of record (only when the repo has the design-sync practice** — `scripts/design-check.py`
+   exists or CLAUDE.md/AGENTS.md declares `design-check: <path>`; otherwise skip this item).
+   Run `python3 <design-check> --diff <worktree>` and read every decision (`D-n`) and section it
+   lists under CODE → DESIGN, plus `docs/decisions/DECISIONS.md` entries for the area. Write in
+   the run-log: `design: D-…, RFC-… §… read; premise ok` — or, if the issue's premise
+   contradicts a decision, **stop here** and settle it with the user (fix the issue text, or
+   amend the decision in this PR). Issues have been wrong at the intent level with every fact in
+   them true; the register is what a premise is checked against, not the issue's prose. If the
+   design leaves the choice open, decide it below and treat the outcome as a decision to
+   *record* (`/design-sync record`) — a `D-n` with a callout, a code citation and a test pin, in
+   this PR.
 1. **Data & state model** — the types this change introduces or alters. Make invalid states
    unrepresentable; prefer a newtype/`opaque type` over a bare primitive; prefer an `enum`/ADT
    over a boolean pair. Name each type and its invariant.
@@ -434,6 +445,8 @@ Output this block when the gate passes:
 
 ### Design
 - <one line per Phase 2.5 decision that shaped the diff>
+- Design: unchanged — <docs/decisions the diff cites>, confirmed | amended — D-n (<one line>) | n/a — <why>
+  (mandatory line when the repo has design-sync; copy it into the PR body; `design-check --strict` must pass)
 
 ### Acceptance criteria + edge cases → gate
 - [x] <criterion 1> — covered by test `<test_name>`
