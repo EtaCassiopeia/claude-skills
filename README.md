@@ -11,10 +11,11 @@ Includes library-specific skills for [zio-openfeature](config/skills/zio-openfea
 |-----------|------|---------|
 | CLAUDE.md | `config/CLAUDE.md` | Global instructions — coding philosophy, build commands, conventions |
 | Rules | `config/rules/` | Language-specific rules (Rust, Scala 3 / ZIO 2, Scala type-level) |
-| Agents | `config/agents/` | Specialized agents (architect, developer, reviewer, tester) |
+| Agents | `config/agents/` | Specialized agents (architect, developer, reviewer, tester, bulk-reader) |
 | Skills | `config/skills/` | Slash commands and best-practice reference skills |
 | Settings | `config/settings.json` | Plugins, hooks, permissions, and status line |
 | Status line | `config/statusline.sh` | Always-visible powerline bar: folder, git status, model, context usage |
+| Hooks | `config/hooks/` | Standalone PreToolUse hooks (bulk-read-guard) |
 | MCP Servers | `config/mcp-servers.json` | MCP server registrations (cargo-mcp, rust-analyzer-mcp) |
 | graphify | `config/graphify/` | Knowledge-graph git hooks, worktree seeding, design-drift report ([guide](config/graphify/README.md)) |
 | Global gitignore | `config/gitignore_global` | Ignore rules applied to every repo — keeps agent and knowledge-graph artifacts out of `git status` |
@@ -60,8 +61,10 @@ Agents are specialized Claude Code modes with constrained tool access.
 | **developer** | Write code, fix bugs, refactor | Read + Write + Bash |
 | **reviewer** | Code review, security scan, idiom compliance | Read-only + clippy/compile |
 | **tester** | Write tests, coverage analysis, property-based testing | Read + Write + Bash |
+| **bulk-reader** | Reads large files in an isolated context, returns bullets not contents (Haiku) | Read + Grep + Glob + Bash |
 
 Use them with `@architect`, `@developer`, `@reviewer`, `@tester` in Claude Code.
+`bulk-reader` is not @-mentioned — the bulk-read guard routes blocked reads to it.
 
 ## Rules
 
@@ -137,6 +140,32 @@ The `settings.json` includes PostToolUse hooks that run automatically:
 - **Scala**: After any `Edit` or `Write` to a `.scala` file → `sbt compile` runs automatically
 
 This gives instant compilation feedback as Claude Code edits your code.
+
+### Bulk-read guard (PreToolUse)
+
+`config/hooks/bulk-read-guard.py` blocks whole-file reads of large files and redirects them
+to the `bulk-reader` Haiku subagent, so file contents never enter the main context. It is
+registered on both `Read` and `Bash` — in bypass-permissions mode Claude reads with `cat`,
+so a `Read`-only guard would be bypassed most of the time.
+
+Bash detection is deliberately narrow: unpiped `cat FILE`, plus `head`/`tail` with an
+explicit `-n` above the threshold. Anything piped or redirected, bare `head`/`tail`, and
+ranged `sed -n '1,120p'` pass through untouched.
+
+Escape hatches, because a gate with no exit deadlocks editing and would trap the subagent
+reading the very files it was handed:
+
+- `Read` with `offset`/`limit` is always allowed — a targeted read is already scoped
+- **The second request for the same path is allowed.** The first denial delivers the nudge;
+  a repeat means the content is genuinely needed. This is what breaks subagent recursion.
+- `BULKREAD_OFF=1` disables it entirely
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `BULKREAD_MIN_LINES` | 800 | Line count above which a whole-file read is blocked |
+| `BULKREAD_MAX_BYTES` | 60000 | Byte size above which it is blocked (catches minified files) |
+| `BULKREAD_TTL` | 3600 | Seconds the second-attempt escape hatch stays open, per path |
+| `BULKREAD_OFF` | unset | Set to any value to disable the guard |
 
 ## Status Line
 `config/statusline.sh` is symlinked to `~/.claude/statusline.sh` and wired in via the
@@ -265,7 +294,8 @@ git add -A && git commit -m "Update rust rules"
 ```sh
 # Remove symlinks and restore backups (or just delete symlinks)
 for f in ~/.claude/CLAUDE.md ~/.claude/rules/rust.md ~/.claude/rules/scala-zio.md \
-         ~/.claude/agents/*/AGENT.md ~/.claude/skills/*/SKILL.md ~/.claude/statusline.sh; do
+         ~/.claude/agents/*/AGENT.md ~/.claude/agents/*.md \
+         ~/.claude/hooks/* ~/.claude/skills/*/SKILL.md ~/.claude/statusline.sh; do
     [ -L "$f" ] && rm "$f"
 done
 
