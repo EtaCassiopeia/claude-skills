@@ -13,7 +13,8 @@ Includes library-specific skills for [zio-openfeature](config/skills/zio-openfea
 | Rules | `config/rules/` | Language-specific rules (Rust, Scala 3 / ZIO 2, Scala type-level) |
 | Agents | `config/agents/` | Specialized agents (architect, developer, reviewer, tester) |
 | Skills | `config/skills/` | Slash commands and best-practice reference skills |
-| Settings | `config/settings.json` | Plugins, hooks, and permissions |
+| Settings | `config/settings.json` | Plugins, hooks, permissions, and status line |
+| Status line | `config/statusline.sh` | Always-visible powerline bar: folder, git status, model, context usage |
 | MCP Servers | `config/mcp-servers.json` | MCP server registrations (cargo-mcp, rust-analyzer-mcp) |
 | graphify | `config/graphify/` | Knowledge-graph git hooks, worktree seeding, design-drift report ([guide](config/graphify/README.md)) |
 | Global gitignore | `config/gitignore_global` | Ignore rules applied to every repo — keeps agent and knowledge-graph artifacts out of `git status` |
@@ -23,6 +24,8 @@ Includes library-specific skills for [zio-openfeature](config/skills/zio-openfea
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and run at least once (`~/.claude/` must exist)
 - [Rust toolchain](https://rustup.rs) (`cargo`, `rustc`)
 - `python3` (ships with macOS)
+- `jq` (used by the status line; `brew install jq` if missing)
+- A [Nerd Font](https://www.nerdfonts.com) as the terminal font, for the status line icons (`brew install --cask font-jetbrains-mono-nerd-font`)
 - Optional: Java 11+ and [sbt](https://www.scala-sbt.org/) for Scala development
 
 ## Quick Start
@@ -41,11 +44,11 @@ The `setup.sh` script is idempotent — safe to re-run anytime (e.g., after `git
 
 1. **Preflight** — verifies `claude`, `cargo`, `python3` are available and `~/.claude/` exists
 2. **Create directories** — ensures all required directories exist under `~/.claude/`
-3. **Symlink files** — links `~/.claude/{CLAUDE.md, rules, agents, skills}` to files in this repo, `~/.claude/graphify` to `config/graphify/`, and `~/.gitignore_global` to `config/gitignore_global` (also setting `git config --global core.excludesFile`, since the symlink alone does nothing). If a regular file or directory exists, it's backed up first. Correct symlinks are skipped.
+3. **Symlink files** — links `~/.claude/{CLAUDE.md, rules, agents, skills, statusline.sh}` to files in this repo, `~/.claude/graphify` to `config/graphify/`, and `~/.gitignore_global` to `config/gitignore_global` (also setting `git config --global core.excludesFile`, since the symlink alone does nothing). If a regular file or directory exists, it's backed up first. Correct symlinks are skipped.
 4. **Merge settings.json** — deep-merges `config/settings.json` into `~/.claude/settings.json`. Repo values win on conflicts; any extra user-added entries are preserved. Backs up before writing.
 5. **Register MCP servers** — patches `~/.claude.json` to add MCP server entries. Only touches the `mcpServers` key; all other data (telemetry, state) is untouched. Backs up before writing.
 6. **Install MCP binaries** — runs `cargo install` for `cargo-mcp` and `rust-analyzer-mcp` (skips if already installed)
-7. **Verify** — confirms all symlinks, settings keys, MCP registrations, and binaries
+7. **Verify** — confirms all symlinks, settings keys (including `statusLine`), MCP registrations, and binaries
 
 ## Agents
 
@@ -135,6 +138,36 @@ The `settings.json` includes PostToolUse hooks that run automatically:
 
 This gives instant compilation feedback as Claude Code edits your code.
 
+## Status Line
+`config/statusline.sh` is symlinked to `~/.claude/statusline.sh` and wired in via the
+`statusLine` key of `settings.json`. Every session shows an always-visible powerline bar in
+the style of powerlevel10k: rounded, coloured segments with Nerd Font icons.
+```
+( ~/Projects/foo ) ( feat/x ⇡2 ●3 ) ( 󰚩 Opus 5.5 ) ( 󰧑 ▰▰▰▰▰▰▱▱▱▱ 63% )
+```
+| Segment | Shows | Colour |
+|---------|-------|--------|
+| Directory | Working folder, `~`-relative, truncated to the last 3 parts | blue |
+| Worktree | Name of the linked git worktree (e.g. a `claude --worktree` session). Hidden in the main checkout | sky blue |
+| Git | Branch (or `@sha` if detached), a `rebasing`/`merging` marker while one is in progress (the branch being rebased is still named), `⇡`/`⇣` ahead/behind, `●n` changed files. Hidden outside a repo | green when clean, yellow when dirty |
+| Model | Model display name | purple |
+| Context | 10-cell bar and percentage of the context window used | teal under 50%, orange from 50%, red from 80% |
+With several sessions open, you can tell them apart at a glance.
+**Needs** a [Nerd Font](https://www.nerdfonts.com) set as the terminal font (e.g. JetBrainsMono
+Nerd Font, which powerlevel10k also uses) and a truecolor terminal (Ghostty, iTerm2,
+WezTerm, Kitty). Without a Nerd Font, the icons and segment edges render as boxes.
+**abtop compatibility:** `abtop --setup` points `statusLine` at its own
+`~/.claude/abtop-statusline.sh`, which only records rate limits and prints nothing, so the
+bar goes blank. `statusline.sh` calls that hook itself when it exists, so abtop keeps working.
+If the bar goes blank after running `abtop --setup`, re-run `./setup.sh` (repo settings win
+on merge) or set `statusLine.command` back to `$HOME/.claude/statusline.sh`.
+To customize it, edit `config/statusline.sh`. It reads the session JSON on stdin
+(`workspace.current_dir`, `model.display_name`, `context_window.used_percentage`, …)
+and prints one line. You can test it without a session:
+```sh
+echo '{"model":{"display_name":"Opus"},"workspace":{"current_dir":"'"$PWD"'"},"context_window":{"used_percentage":42}}' \
+  | ~/.claude/statusline.sh
+```
 ## graphify Knowledge Graph
 
 Makes Claude navigate a knowledge graph instead of grepping raw files, keeps that graph fresh
@@ -223,6 +256,8 @@ git add -A && git commit -m "Update rust rules"
 
 **Symlink broken:** Run `./setup.sh` — it will detect and fix broken symlinks.
 
+**Status line blank:** Another tool (e.g. `abtop --setup`) replaced `statusLine` in `~/.claude/settings.json`. Re-run `./setup.sh`. Also make sure `jq` is installed. **Boxes instead of icons:** set a Nerd Font as the terminal font.
+
 **Backup files:** Backups are created as `<filename>.backup.<timestamp>` next to the original file. Safe to delete old ones.
 
 ## Uninstalling
@@ -230,7 +265,7 @@ git add -A && git commit -m "Update rust rules"
 ```sh
 # Remove symlinks and restore backups (or just delete symlinks)
 for f in ~/.claude/CLAUDE.md ~/.claude/rules/rust.md ~/.claude/rules/scala-zio.md \
-         ~/.claude/agents/*/AGENT.md ~/.claude/skills/*/SKILL.md; do
+         ~/.claude/agents/*/AGENT.md ~/.claude/skills/*/SKILL.md ~/.claude/statusline.sh; do
     [ -L "$f" ] && rm "$f"
 done
 

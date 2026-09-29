@@ -49,6 +49,7 @@ check_cmd() {
 check_cmd claude "Install Claude Code first: https://docs.anthropic.com/en/docs/claude-code"
 check_cmd cargo  "Install Rust toolchain: https://rustup.rs"
 check_cmd python3 "python3 is required for JSON merging"
+check_cmd jq      "jq is required by the status line script (brew install jq)"
 
 if [ ! -d "$CLAUDE_DIR" ]; then
     fail "~/.claude/ does not exist — run Claude Code at least once first"
@@ -149,6 +150,7 @@ symlink_file "$CONFIG_DIR/skills/fix-issue/SKILL.md"               "$CLAUDE_DIR/
 symlink_file "$CONFIG_DIR/skills/design-sync/SKILL.md"             "$CLAUDE_DIR/skills/design-sync/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/triage-issue/SKILL.md"            "$CLAUDE_DIR/skills/triage-issue/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/babysit-prs/SKILL.md"             "$CLAUDE_DIR/skills/babysit-prs/SKILL.md"
+symlink_file "$CONFIG_DIR/statusline.sh"                     "$CLAUDE_DIR/statusline.sh"
 symlink_file "$CONFIG_DIR/rules/scala-typelevel.md"                "$CLAUDE_DIR/rules/scala-typelevel.md"
 
 # symlink_dir <source_dir_in_repo> <target_under_home>
@@ -200,6 +202,7 @@ fi
 
 # The hooks and scripts must stay executable through the symlink.
 chmod +x "$CONFIG_DIR"/graphify/hooks/* "$CONFIG_DIR"/graphify/bin/* 2>/dev/null || true
+chmod +x "$CONFIG_DIR/statusline.sh"
 
 # ==============================================================================
 # 4. Merge settings.json (deep merge — repo values win, extras preserved)
@@ -351,6 +354,7 @@ verify_symlink "$CLAUDE_DIR/skills/fp-patterns/SKILL.md"             "$CONFIG_DI
 verify_symlink "$CLAUDE_DIR/skills/fp-advanced/SKILL.md"             "$CONFIG_DIR/skills/fp-advanced/SKILL.md"
 verify_symlink "$CLAUDE_DIR/skills/scala-typelevel/SKILL.md"         "$CONFIG_DIR/skills/scala-typelevel/SKILL.md"
 verify_symlink "$CLAUDE_DIR/skills/cats-ecosystem/SKILL.md"          "$CONFIG_DIR/skills/cats-ecosystem/SKILL.md"
+verify_symlink "$CLAUDE_DIR/statusline.sh"                     "$CONFIG_DIR/statusline.sh"
 verify_symlink "$CLAUDE_DIR/rules/scala-typelevel.md"                "$CONFIG_DIR/rules/scala-typelevel.md"
 verify_symlink "$CLAUDE_DIR/graphify"                                "$CONFIG_DIR/graphify"
 verify_symlink "$HOME/.gitignore_global"                             "$CONFIG_DIR/gitignore_global"
@@ -366,7 +370,7 @@ fi
 python3 -c "
 import json, sys
 s = json.load(open('$CLAUDE_DIR/settings.json'))
-required = ['enabledPlugins', 'hooks', 'permissions']
+required = ['enabledPlugins', 'hooks', 'permissions', 'statusLine']
 missing = [k for k in required if k not in s]
 if missing:
     print(f'[FAIL]  settings.json missing keys: {missing}')

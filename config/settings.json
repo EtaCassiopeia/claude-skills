@@ -25,6 +25,10 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "$HOME/.claude/statusline.sh"
+  },
   "permissions": {
     "allow": [
       "Bash(cargo fmt*)",
