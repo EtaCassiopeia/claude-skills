@@ -87,6 +87,7 @@ dirs=(
 "$CLAUDE_DIR/skills/design-sync"
     "$CLAUDE_DIR/skills/triage-issue"
     "$CLAUDE_DIR/skills/babysit-prs"
+    "$CLAUDE_DIR/skills/ship-issues-review"
 )
 
 for dir in "${dirs[@]}"; do
@@ -151,6 +152,7 @@ symlink_file "$CONFIG_DIR/skills/fix-issue/SKILL.md"               "$CLAUDE_DIR/
 symlink_file "$CONFIG_DIR/skills/design-sync/SKILL.md"             "$CLAUDE_DIR/skills/design-sync/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/triage-issue/SKILL.md"            "$CLAUDE_DIR/skills/triage-issue/SKILL.md"
 symlink_file "$CONFIG_DIR/skills/babysit-prs/SKILL.md"             "$CLAUDE_DIR/skills/babysit-prs/SKILL.md"
+symlink_file "$CONFIG_DIR/skills/ship-issues-review/SKILL.md"       "$CLAUDE_DIR/skills/ship-issues-review/SKILL.md"
 symlink_file "$CONFIG_DIR/statusline.sh"                     "$CLAUDE_DIR/statusline.sh"
 symlink_file "$CONFIG_DIR/agents/bulk-reader.md"              "$CLAUDE_DIR/agents/bulk-reader.md"
 symlink_file "$CONFIG_DIR/hooks/bulk-read-guard.py"           "$CLAUDE_DIR/hooks/bulk-read-guard.py"
