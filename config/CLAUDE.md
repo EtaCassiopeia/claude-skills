@@ -101,6 +101,29 @@ Keep running in background. It writes `.mcp.json` at project root for Claude Cod
 - Never commit secrets, `.env` files, or credentials
 - The global git hook at `~/.git-hooks/pre-push` blocks pushes with "Claude" in commit messages — respect this by not including Claude attribution in commit message bodies (Co-Authored-By trailers are fine when explicitly requested)
 
+## Writing Style — ASD-STE100 Simplified Technical English
+
+Write all prose that a human reads in ASD-STE100 Simplified Technical English. This includes:
+documents (design docs, READMEs, `docs/` pages, reports, artifacts), explanations in chat,
+task-outcome summaries, PR bodies, issue bodies and comments, and commit message bodies.
+
+Rules:
+- Short sentences: procedural (instruction) sentences 20 words max; descriptive sentences 25 words max.
+- One instruction per sentence. Write instructions in the imperative ("Run the test.", not "You should run the test.").
+- Active voice. Use passive voice only when the agent is unknown or not important.
+- One word, one meaning. Use the same term for the same thing every time — no synonyms for variety.
+- Use simple, common words: "use" not "utilize", "start" not "initiate", "show" not "demonstrate", "about" not "approximately".
+- Simple verb tenses only: present, simple past, simple future. Avoid "-ing" forms where a plain verb works.
+- Write articles ("the", "a") and "that" — do not drop them to save words.
+- Max 3 nouns in a noun cluster; break longer clusters with "of"/"for".
+- One topic per paragraph; paragraph max 6 sentences. Use numbered lists for steps, bulleted lists for items.
+- Write warnings and cautions as a command first, then the reason ("Do not push to master. The hook blocks the push.").
+- No idioms, slang, or figurative language.
+
+Exceptions — keep verbatim, STE does not apply: code, identifiers, CLI commands, file paths, error text,
+quoted user words, technical terms of the domain (e.g. "imposter", "stub", "Raft"), commit subject
+lines that must follow conventional-commit format, and code comments (match the surrounding code).
+
 @RTK.md
 
 # graphify
